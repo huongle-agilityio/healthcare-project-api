@@ -87,7 +87,7 @@
       "type": "relation",
       "relation": "oneToMany",
       "target": "api::appointment.appointment",
-      "mappedBy": "users_id"
+      "mappedBy": "user_id"
     }
   }
 }

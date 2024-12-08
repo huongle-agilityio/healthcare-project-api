@@ -401,6 +401,7 @@ export interface ApiAboutAbout extends Struct.SingleTypeSchema {
 export interface ApiAppointmentAppointment extends Struct.CollectionTypeSchema {
   collectionName: 'appointments';
   info: {
+    description: '';
     displayName: 'Appointment';
     pluralName: 'appointments';
     singularName: 'appointment';
@@ -423,7 +424,7 @@ export interface ApiAppointmentAppointment extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    users_id: Schema.Attribute.Relation<
+    user_id: Schema.Attribute.Relation<
       'manyToOne',
       'plugin::users-permissions.user'
     >;

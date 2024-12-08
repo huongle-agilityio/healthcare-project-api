@@ -9,6 +9,7 @@ specifiers:
   '@types/react-dom': ^18
   better-sqlite3: 11.3.0
   fs-extra: ^10.0.0
+  healcare-project-api: 'file:'
   mime-types: ^2.1.27
   react: ^18.0.0
   react-dom: ^18.0.0
@@ -22,6 +23,7 @@ dependencies:
   '@strapi/strapi': 5.5.0_ltn2lmhodytgeeudr7s33iakvy
   better-sqlite3: 11.3.0
   fs-extra: 10.1.0
+  healcare-project-api: file:_gbw4vdelsvugfzckvxejhwvtfu
   mime-types: 2.1.35
   react: 18.3.1
   react-dom: 18.3.1_react@18.3.1
@@ -11710,4 +11712,63 @@ packages:
 
   /zod/3.23.8:
     resolution: {integrity: sha512-XBx9AXhXktjUqnepgTiE5flcKIYWi/rme0Eaj+5Y0lftuGBq+jyRu/md4WnuxqgP1ubdpNCsYEYPxrzVHD8d6g==}
+    dev: false
+
+  file:_gbw4vdelsvugfzckvxejhwvtfu:
+    resolution: {directory: '', type: directory}
+    id: 'file:'
+    name: healcare-project-api
+    version: 0.1.0
+    engines: {node: '>=18.0.0 <=22.x.x', npm: '>=6.0.0'}
+    dependencies:
+      '@strapi/plugin-cloud': 5.5.0_h23mrnezq7sqlwj55xhj2afzxe
+      '@strapi/plugin-users-permissions': 5.5.0_h23mrnezq7sqlwj55xhj2afzxe
+      '@strapi/strapi': 5.5.0_ltn2lmhodytgeeudr7s33iakvy
+      better-sqlite3: 11.3.0
+      fs-extra: 10.1.0
+      mime-types: 2.1.35
+      react: 18.3.1
+      react-dom: 18.3.1_react@18.3.1
+      react-router-dom: 6.28.0_nnrd3gsncyragczmpvfhocinkq
+      styled-components: 6.1.13_nnrd3gsncyragczmpvfhocinkq
+    transitivePeerDependencies:
+      - '@codemirror/view'
+      - '@rspack/core'
+      - '@swc/core'
+      - '@swc/helpers'
+      - '@types/hoist-non-react-statics'
+      - '@types/node'
+      - '@types/react'
+      - '@types/react-dom'
+      - '@types/webpack'
+      - bufferutil
+      - debug
+      - koa
+      - less
+      - lightningcss
+      - mongoose
+      - mysql
+      - mysql2
+      - pg
+      - pg-native
+      - react-native
+      - redis
+      - redux
+      - sass
+      - sass-embedded
+      - sequelize
+      - sockjs-client
+      - sqlite3
+      - stylus
+      - sugarss
+      - supports-color
+      - tedious
+      - terser
+      - type-fest
+      - typescript
+      - uglify-js
+      - utf-8-validate
+      - webpack-cli
+      - webpack-dev-server
+      - webpack-plugin-serve
     dev: false
