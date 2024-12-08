@@ -1,0 +1,25 @@
+{
+  "kind": "collectionType",
+  "collectionName": "specialities",
+  "info": {
+    "singularName": "speciality",
+    "pluralName": "specialities",
+    "displayName": "Speciality"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string",
+      "required": true
+    },
+    "doctors": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::doctor.doctor",
+      "mappedBy": "speciality_id"
+    }
+  }
+}

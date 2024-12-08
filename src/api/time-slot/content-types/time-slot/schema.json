@@ -1,0 +1,25 @@
+{
+  "kind": "collectionType",
+  "collectionName": "time_slots",
+  "info": {
+    "singularName": "time-slot",
+    "pluralName": "time-slots",
+    "displayName": "TimeSlot"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "time": {
+      "type": "string",
+      "required": true
+    },
+    "Doctor_TimeSlots": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::doctor-time-slot.doctor-time-slot",
+      "mappedBy": "timeSlot_id"
+    }
+  }
+}

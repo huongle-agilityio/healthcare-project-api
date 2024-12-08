@@ -1,0 +1,36 @@
+{
+  "kind": "collectionType",
+  "collectionName": "doctor_time_slots",
+  "info": {
+    "singularName": "doctor-time-slot",
+    "pluralName": "doctor-time-slots",
+    "displayName": "Doctor_TimeSlot"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "isAvailable": {
+      "type": "boolean",
+      "default": true,
+      "required": true
+    },
+    "date": {
+      "type": "date",
+      "required": true
+    },
+    "doctor_id": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::doctor.doctor",
+      "inversedBy": "Doctor_TimeSlots"
+    },
+    "timeSlot_id": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::time-slot.time-slot",
+      "inversedBy": "Doctor_TimeSlots"
+    }
+  }
+}
