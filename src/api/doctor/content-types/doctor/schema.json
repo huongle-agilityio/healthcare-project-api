@@ -35,10 +35,10 @@
       "target": "api::appointment.appointment",
       "mappedBy": "doctor_id"
     },
-    "speciality_id": {
+    "specialty_id": {
       "type": "relation",
       "relation": "manyToOne",
-      "target": "api::speciality.speciality",
+      "target": "api::specialty.specialty",
       "inversedBy": "doctors"
     },
     "Doctor_TimeSlots": {
@@ -46,6 +46,9 @@
       "relation": "oneToMany",
       "target": "api::doctor-time-slot.doctor-time-slot",
       "mappedBy": "doctor_id"
+    },
+    "avatar": {
+      "type": "text"
     }
   }
 }

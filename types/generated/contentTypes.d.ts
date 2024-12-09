@@ -484,6 +484,7 @@ export interface ApiDoctorDoctor extends Struct.CollectionTypeSchema {
       'oneToMany',
       'api::appointment.appointment'
     >;
+    avatar: Schema.Attribute.Text;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -504,9 +505,9 @@ export interface ApiDoctorDoctor extends Struct.CollectionTypeSchema {
     rating: Schema.Attribute.Integer &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<0>;
-    speciality_id: Schema.Attribute.Relation<
+    specialty_id: Schema.Attribute.Relation<
       'manyToOne',
-      'api::speciality.speciality'
+      'api::specialty.specialty'
     >;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -546,12 +547,13 @@ export interface ApiGlobalGlobal extends Struct.SingleTypeSchema {
   };
 }
 
-export interface ApiSpecialitySpeciality extends Struct.CollectionTypeSchema {
+export interface ApiSpecialtySpecialty extends Struct.CollectionTypeSchema {
   collectionName: 'specialities';
   info: {
-    displayName: 'Speciality';
+    description: '';
+    displayName: 'Specialty';
     pluralName: 'specialities';
-    singularName: 'speciality';
+    singularName: 'specialty';
   };
   options: {
     draftAndPublish: true;
@@ -564,7 +566,7 @@ export interface ApiSpecialitySpeciality extends Struct.CollectionTypeSchema {
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
-      'api::speciality.speciality'
+      'api::specialty.specialty'
     > &
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
@@ -1136,7 +1138,7 @@ declare module '@strapi/strapi' {
       'api::doctor-time-slot.doctor-time-slot': ApiDoctorTimeSlotDoctorTimeSlot;
       'api::doctor.doctor': ApiDoctorDoctor;
       'api::global.global': ApiGlobalGlobal;
-      'api::speciality.speciality': ApiSpecialitySpeciality;
+      'api::specialty.specialty': ApiSpecialtySpecialty;
       'api::time-slot.time-slot': ApiTimeSlotTimeSlot;
       'plugin::content-releases.release': PluginContentReleasesRelease;
       'plugin::content-releases.release-action': PluginContentReleasesReleaseAction;
