@@ -4,7 +4,8 @@
   "info": {
     "singularName": "time-slot",
     "pluralName": "time-slots",
-    "displayName": "TimeSlot"
+    "displayName": "TimeSlot",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
@@ -15,11 +16,11 @@
       "type": "string",
       "required": true
     },
-    "Doctor_TimeSlots": {
+    "doctorTimeSlots": {
       "type": "relation",
       "relation": "oneToMany",
       "target": "api::doctor-time-slot.doctor-time-slot",
-      "mappedBy": "timeSlot_id"
+      "mappedBy": "timeSlotId"
     }
   }
 }

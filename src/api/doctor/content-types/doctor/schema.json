@@ -29,26 +29,26 @@
       "type": "integer",
       "required": true
     },
-    "appointments": {
-      "type": "relation",
-      "relation": "oneToMany",
-      "target": "api::appointment.appointment",
-      "mappedBy": "doctor_id"
-    },
-    "specialty_id": {
+    "specialty": {
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::specialty.specialty",
       "inversedBy": "doctors"
     },
-    "Doctor_TimeSlots": {
+    "avatar": {
+      "type": "text"
+    },
+    "appointments": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::appointment.appointment",
+      "mappedBy": "doctorId"
+    },
+    "doctorTimeSlots": {
       "type": "relation",
       "relation": "oneToMany",
       "target": "api::doctor-time-slot.doctor-time-slot",
-      "mappedBy": "doctor_id"
-    },
-    "avatar": {
-      "type": "text"
+      "mappedBy": "doctorId"
     }
   }
 }

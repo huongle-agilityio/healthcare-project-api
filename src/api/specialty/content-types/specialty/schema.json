@@ -1,9 +1,9 @@
 {
   "kind": "collectionType",
-  "collectionName": "specialities",
+  "collectionName": "specialties",
   "info": {
     "singularName": "specialty",
-    "pluralName": "specialities",
+    "pluralName": "specialties",
     "displayName": "Specialty",
     "description": ""
   },
@@ -20,7 +20,7 @@
       "type": "relation",
       "relation": "oneToMany",
       "target": "api::doctor.doctor",
-      "mappedBy": "specialty_id"
+      "mappedBy": "specialty"
     }
   }
 }

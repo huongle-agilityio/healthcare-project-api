@@ -12,13 +12,13 @@
   },
   "pluginOptions": {},
   "attributes": {
-    "user_id": {
+    "userId": {
       "type": "relation",
       "relation": "manyToOne",
       "target": "plugin::users-permissions.user",
       "inversedBy": "appointments"
     },
-    "doctor_id": {
+    "doctorId": {
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::doctor.doctor",

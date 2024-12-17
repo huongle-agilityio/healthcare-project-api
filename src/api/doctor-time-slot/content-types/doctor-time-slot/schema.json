@@ -4,7 +4,8 @@
   "info": {
     "singularName": "doctor-time-slot",
     "pluralName": "doctor-time-slots",
-    "displayName": "Doctor_TimeSlot"
+    "displayName": "Doctor_TimeSlot",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
@@ -20,17 +21,17 @@
       "type": "date",
       "required": true
     },
-    "doctor_id": {
-      "type": "relation",
-      "relation": "manyToOne",
-      "target": "api::doctor.doctor",
-      "inversedBy": "Doctor_TimeSlots"
-    },
-    "timeSlot_id": {
+    "timeSlotId": {
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::time-slot.time-slot",
-      "inversedBy": "Doctor_TimeSlots"
+      "inversedBy": "doctorTimeSlots"
+    },
+    "doctorId": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::doctor.doctor",
+      "inversedBy": "doctorTimeSlots"
     }
   }
 }

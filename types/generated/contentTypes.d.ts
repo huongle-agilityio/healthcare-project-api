@@ -413,7 +413,7 @@ export interface ApiAppointmentAppointment extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    doctor_id: Schema.Attribute.Relation<'manyToOne', 'api::doctor.doctor'>;
+    doctorId: Schema.Attribute.Relation<'manyToOne', 'api::doctor.doctor'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -424,7 +424,7 @@ export interface ApiAppointmentAppointment extends Struct.CollectionTypeSchema {
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    user_id: Schema.Attribute.Relation<
+    userId: Schema.Attribute.Relation<
       'manyToOne',
       'plugin::users-permissions.user'
     >;
@@ -435,6 +435,7 @@ export interface ApiDoctorTimeSlotDoctorTimeSlot
   extends Struct.CollectionTypeSchema {
   collectionName: 'doctor_time_slots';
   info: {
+    description: '';
     displayName: 'Doctor_TimeSlot';
     pluralName: 'doctor-time-slots';
     singularName: 'doctor-time-slot';
@@ -447,7 +448,7 @@ export interface ApiDoctorTimeSlotDoctorTimeSlot
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     date: Schema.Attribute.Date & Schema.Attribute.Required;
-    doctor_id: Schema.Attribute.Relation<'manyToOne', 'api::doctor.doctor'>;
+    doctorId: Schema.Attribute.Relation<'manyToOne', 'api::doctor.doctor'>;
     isAvailable: Schema.Attribute.Boolean &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<true>;
@@ -458,7 +459,7 @@ export interface ApiDoctorTimeSlotDoctorTimeSlot
     > &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
-    timeSlot_id: Schema.Attribute.Relation<
+    timeSlotId: Schema.Attribute.Relation<
       'manyToOne',
       'api::time-slot.time-slot'
     >;
@@ -488,7 +489,7 @@ export interface ApiDoctorDoctor extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    Doctor_TimeSlots: Schema.Attribute.Relation<
+    doctorTimeSlots: Schema.Attribute.Relation<
       'oneToMany',
       'api::doctor-time-slot.doctor-time-slot'
     >;
@@ -505,7 +506,7 @@ export interface ApiDoctorDoctor extends Struct.CollectionTypeSchema {
     rating: Schema.Attribute.Integer &
       Schema.Attribute.Required &
       Schema.Attribute.DefaultTo<0>;
-    specialty_id: Schema.Attribute.Relation<
+    specialty: Schema.Attribute.Relation<
       'manyToOne',
       'api::specialty.specialty'
     >;
@@ -548,11 +549,11 @@ export interface ApiGlobalGlobal extends Struct.SingleTypeSchema {
 }
 
 export interface ApiSpecialtySpecialty extends Struct.CollectionTypeSchema {
-  collectionName: 'specialities';
+  collectionName: 'specialties';
   info: {
     description: '';
     displayName: 'Specialty';
-    pluralName: 'specialities';
+    pluralName: 'specialties';
     singularName: 'specialty';
   };
   options: {
@@ -580,6 +581,7 @@ export interface ApiSpecialtySpecialty extends Struct.CollectionTypeSchema {
 export interface ApiTimeSlotTimeSlot extends Struct.CollectionTypeSchema {
   collectionName: 'time_slots';
   info: {
+    description: '';
     displayName: 'TimeSlot';
     pluralName: 'time-slots';
     singularName: 'time-slot';
@@ -591,7 +593,7 @@ export interface ApiTimeSlotTimeSlot extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    Doctor_TimeSlots: Schema.Attribute.Relation<
+    doctorTimeSlots: Schema.Attribute.Relation<
       'oneToMany',
       'api::doctor-time-slot.doctor-time-slot'
     >;
