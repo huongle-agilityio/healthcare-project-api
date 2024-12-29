@@ -29,9 +29,6 @@
       "type": "integer",
       "required": true
     },
-    "avatar": {
-      "type": "text"
-    },
     "appointments": {
       "type": "relation",
       "relation": "oneToMany",
@@ -49,6 +46,16 @@
       "relation": "oneToMany",
       "target": "api::booking-time-slot.booking-time-slot",
       "mappedBy": "doctor"
+    },
+    "avatar": {
+      "allowedTypes": [
+        "images",
+        "files",
+        "videos",
+        "audios"
+      ],
+      "type": "media",
+      "multiple": false
     }
   }
 }

@@ -486,7 +486,7 @@ export interface ApiDoctorDoctor extends Struct.CollectionTypeSchema {
       'oneToMany',
       'api::appointment.appointment'
     >;
-    avatar: Schema.Attribute.Text;
+    avatar: Schema.Attribute.Media<'images' | 'files' | 'videos' | 'audios'>;
     bookingTimeSlots: Schema.Attribute.Relation<
       'oneToMany',
       'api::booking-time-slot.booking-time-slot'
