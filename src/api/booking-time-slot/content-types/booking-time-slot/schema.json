@@ -1,0 +1,36 @@
+{
+  "kind": "collectionType",
+  "collectionName": "booking_time_slots",
+  "info": {
+    "singularName": "booking-time-slot",
+    "pluralName": "booking-time-slots",
+    "displayName": "Booking_Time_Slot"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "date": {
+      "type": "string"
+    },
+    "timeSlot": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::time-slot.time-slot",
+      "inversedBy": "booking_time_slots"
+    },
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user",
+      "inversedBy": "bookingTimeSlots"
+    },
+    "doctor": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::doctor.doctor",
+      "inversedBy": "bookingTimeSlots"
+    }
+  }
+}

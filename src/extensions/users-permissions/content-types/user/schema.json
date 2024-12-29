@@ -75,10 +75,6 @@
       "max": "10",
       "min": "10"
     },
-    "gender": {
-      "type": "boolean",
-      "default": true
-    },
     "dateOfBirth": {
       "type": "date",
       "private": true
@@ -88,6 +84,15 @@
       "relation": "oneToMany",
       "target": "api::appointment.appointment",
       "mappedBy": "userId"
+    },
+    "gender": {
+      "type": "string"
+    },
+    "bookingTimeSlots": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::booking-time-slot.booking-time-slot",
+      "mappedBy": "user"
     }
   }
 }

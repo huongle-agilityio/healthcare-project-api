@@ -16,11 +16,11 @@
       "type": "string",
       "required": true
     },
-    "doctorTimeSlots": {
+    "booking_time_slots": {
       "type": "relation",
       "relation": "oneToMany",
-      "target": "api::doctor-time-slot.doctor-time-slot",
-      "mappedBy": "timeSlotId"
+      "target": "api::booking-time-slot.booking-time-slot",
+      "mappedBy": "timeSlot"
     }
   }
 }

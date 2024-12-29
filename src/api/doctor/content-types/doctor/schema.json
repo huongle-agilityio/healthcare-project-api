@@ -29,12 +29,6 @@
       "type": "integer",
       "required": true
     },
-    "specialty": {
-      "type": "relation",
-      "relation": "manyToOne",
-      "target": "api::specialty.specialty",
-      "inversedBy": "doctors"
-    },
     "avatar": {
       "type": "text"
     },
@@ -44,11 +38,17 @@
       "target": "api::appointment.appointment",
       "mappedBy": "doctorId"
     },
-    "doctorTimeSlots": {
+    "specialty": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::specialty.specialty",
+      "inversedBy": "doctors"
+    },
+    "bookingTimeSlots": {
       "type": "relation",
       "relation": "oneToMany",
-      "target": "api::doctor-time-slot.doctor-time-slot",
-      "mappedBy": "doctorId"
+      "target": "api::booking-time-slot.booking-time-slot",
+      "mappedBy": "doctor"
     }
   }
 }

@@ -413,6 +413,7 @@ export interface ApiAppointmentAppointment extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    date: Schema.Attribute.String;
     doctorId: Schema.Attribute.Relation<'manyToOne', 'api::doctor.doctor'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
@@ -431,14 +432,13 @@ export interface ApiAppointmentAppointment extends Struct.CollectionTypeSchema {
   };
 }
 
-export interface ApiDoctorTimeSlotDoctorTimeSlot
+export interface ApiBookingTimeSlotBookingTimeSlot
   extends Struct.CollectionTypeSchema {
-  collectionName: 'doctor_time_slots';
+  collectionName: 'booking_time_slots';
   info: {
-    description: '';
-    displayName: 'Doctor_TimeSlot';
-    pluralName: 'doctor-time-slots';
-    singularName: 'doctor-time-slot';
+    displayName: 'Booking_Time_Slot';
+    pluralName: 'booking-time-slots';
+    singularName: 'booking-time-slot';
   };
   options: {
     draftAndPublish: true;
@@ -447,25 +447,26 @@ export interface ApiDoctorTimeSlotDoctorTimeSlot
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    date: Schema.Attribute.Date & Schema.Attribute.Required;
-    doctorId: Schema.Attribute.Relation<'manyToOne', 'api::doctor.doctor'>;
-    isAvailable: Schema.Attribute.Boolean &
-      Schema.Attribute.Required &
-      Schema.Attribute.DefaultTo<true>;
+    date: Schema.Attribute.String;
+    doctor: Schema.Attribute.Relation<'manyToOne', 'api::doctor.doctor'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
-      'api::doctor-time-slot.doctor-time-slot'
+      'api::booking-time-slot.booking-time-slot'
     > &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
-    timeSlotId: Schema.Attribute.Relation<
+    timeSlot: Schema.Attribute.Relation<
       'manyToOne',
       'api::time-slot.time-slot'
     >;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
+    user: Schema.Attribute.Relation<
+      'manyToOne',
+      'plugin::users-permissions.user'
+    >;
   };
 }
 
@@ -486,13 +487,13 @@ export interface ApiDoctorDoctor extends Struct.CollectionTypeSchema {
       'api::appointment.appointment'
     >;
     avatar: Schema.Attribute.Text;
+    bookingTimeSlots: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::booking-time-slot.booking-time-slot'
+    >;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    doctorTimeSlots: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::doctor-time-slot.doctor-time-slot'
-    >;
     experience: Schema.Attribute.Integer & Schema.Attribute.Required;
     fee: Schema.Attribute.Integer & Schema.Attribute.Required;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
@@ -570,7 +571,7 @@ export interface ApiSpecialtySpecialty extends Struct.CollectionTypeSchema {
       'api::specialty.specialty'
     > &
       Schema.Attribute.Private;
-    name: Schema.Attribute.String & Schema.Attribute.Required;
+    name: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -590,13 +591,13 @@ export interface ApiTimeSlotTimeSlot extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    booking_time_slots: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::booking-time-slot.booking-time-slot'
+    >;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    doctorTimeSlots: Schema.Attribute.Relation<
-      'oneToMany',
-      'api::doctor-time-slot.doctor-time-slot'
-    >;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1073,6 +1074,10 @@ export interface PluginUsersPermissionsUser
       'api::appointment.appointment'
     >;
     blocked: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    bookingTimeSlots: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::booking-time-slot.booking-time-slot'
+    >;
     confirmationToken: Schema.Attribute.String & Schema.Attribute.Private;
     confirmed: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
     createdAt: Schema.Attribute.DateTime;
@@ -1084,7 +1089,7 @@ export interface PluginUsersPermissionsUser
       Schema.Attribute.SetMinMaxLength<{
         minLength: 6;
       }>;
-    gender: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<true>;
+    gender: Schema.Attribute.String;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -1137,7 +1142,7 @@ declare module '@strapi/strapi' {
       'admin::user': AdminUser;
       'api::about.about': ApiAboutAbout;
       'api::appointment.appointment': ApiAppointmentAppointment;
-      'api::doctor-time-slot.doctor-time-slot': ApiDoctorTimeSlotDoctorTimeSlot;
+      'api::booking-time-slot.booking-time-slot': ApiBookingTimeSlotBookingTimeSlot;
       'api::doctor.doctor': ApiDoctorDoctor;
       'api::global.global': ApiGlobalGlobal;
       'api::specialty.specialty': ApiSpecialtySpecialty;
