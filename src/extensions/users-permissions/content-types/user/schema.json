@@ -79,12 +79,6 @@
       "type": "date",
       "private": true
     },
-    "appointments": {
-      "type": "relation",
-      "relation": "oneToMany",
-      "target": "api::appointment.appointment",
-      "mappedBy": "userId"
-    },
     "gender": {
       "type": "string"
     },

@@ -29,12 +29,6 @@
       "type": "integer",
       "required": true
     },
-    "appointments": {
-      "type": "relation",
-      "relation": "oneToMany",
-      "target": "api::appointment.appointment",
-      "mappedBy": "doctorId"
-    },
     "specialty": {
       "type": "relation",
       "relation": "manyToOne",
@@ -48,14 +42,7 @@
       "mappedBy": "doctor"
     },
     "avatar": {
-      "allowedTypes": [
-        "images",
-        "files",
-        "videos",
-        "audios"
-      ],
-      "type": "media",
-      "multiple": false
+      "type": "text"
     }
   }
 }
