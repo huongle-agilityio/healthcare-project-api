@@ -4,7 +4,8 @@
   "info": {
     "singularName": "booking-time-slot",
     "pluralName": "booking-time-slots",
-    "displayName": "Booking_Time_Slot"
+    "displayName": "Booking_Time_Slot",
+    "description": ""
   },
   "options": {
     "draftAndPublish": true
@@ -31,6 +32,9 @@
       "relation": "manyToOne",
       "target": "api::doctor.doctor",
       "inversedBy": "bookingTimeSlots"
+    },
+    "reason": {
+      "type": "string"
     }
   }
 }

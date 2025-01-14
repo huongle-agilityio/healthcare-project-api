@@ -373,6 +373,7 @@ export interface ApiBookingTimeSlotBookingTimeSlot
   extends Struct.CollectionTypeSchema {
   collectionName: 'booking_time_slots';
   info: {
+    description: '';
     displayName: 'Booking_Time_Slot';
     pluralName: 'booking-time-slots';
     singularName: 'booking-time-slot';
@@ -393,6 +394,7 @@ export interface ApiBookingTimeSlotBookingTimeSlot
     > &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
+    reason: Schema.Attribute.String;
     timeSlot: Schema.Attribute.Relation<
       'manyToOne',
       'api::time-slot.time-slot'
