@@ -439,9 +439,7 @@ export interface ApiDoctorDoctor extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     name: Schema.Attribute.String & Schema.Attribute.Required;
     publishedAt: Schema.Attribute.DateTime;
-    rating: Schema.Attribute.Integer &
-      Schema.Attribute.Required &
-      Schema.Attribute.DefaultTo<0>;
+    rating: Schema.Attribute.Decimal;
     specialty: Schema.Attribute.Relation<
       'manyToOne',
       'api::specialty.specialty'

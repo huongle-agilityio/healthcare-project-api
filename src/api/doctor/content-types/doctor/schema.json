@@ -20,11 +20,6 @@
       "type": "integer",
       "required": true
     },
-    "rating": {
-      "type": "integer",
-      "required": true,
-      "default": 0
-    },
     "experience": {
       "type": "integer",
       "required": true
@@ -43,6 +38,9 @@
     },
     "avatar": {
       "type": "text"
+    },
+    "rating": {
+      "type": "decimal"
     }
   }
 }
