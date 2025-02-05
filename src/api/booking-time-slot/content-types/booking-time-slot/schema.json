@@ -35,6 +35,9 @@
     },
     "reason": {
       "type": "string"
+    },
+    "avatar": {
+      "type": "text"
     }
   }
 }
