@@ -75,12 +75,8 @@
       "max": "10",
       "min": "10"
     },
-    "dateOfBirth": {
-      "type": "date",
-      "private": true
-    },
-    "gender": {
-      "type": "string"
+    "avatar": {
+      "type": "text"
     },
     "bookingTimeSlots": {
       "type": "relation",
