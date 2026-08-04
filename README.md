@@ -297,8 +297,8 @@ flowchart TD
     N3{"3. BookingInputSchema.safeParse<br/>(schemas/booking.ts)"}
     N3a["thiếu field → hỏi lại user<br/>(booking-agent.ts)"]
     N4["4. booking-agent.ts<br/>code gọi thẳng searchHotel (không bindTools)"]
-    N4a["mcp/client.ts — MCP client"]
-    N4b["mcp/booking-server.ts — MCP server<br/>(subprocess riêng)"]
+    N4a["mcp/client.ts<br/>MCP client — process agent"]
+    N4b["mcp/booking-server.ts<br/>MCP server — process con riêng"]
     N4c["mcp/booking-actions.ts<br/>apiGet() → mock booking API"]
     N5["5. booking-agent.ts<br/>promptHotelSelection → interrupt()"]
     CKPT[("db/checkpointer.ts<br/>PostgresSaver — checkpoint")]
@@ -316,8 +316,9 @@ flowchart TD
 
   U --> N1 --> N2 --> N3
   N3 -- thiếu field --> N3a
-  N3 -- đủ field --> N4 --> N4a --> N4b --> N4c
-  N4c --> N5
+  N3 -- đủ field --> N4 --> N4a
+  N4a -. spawn subprocess + stdio .-> N4b --> N4c
+  N4c -. kết quả qua stdio .-> N4a --> N5
   N5 --> CKPT
   N5 -. SSE stream .-> N6 --> N6b --> P
   P -. resolve selectedId .-> N7 --> N8 --> N9
@@ -340,26 +341,49 @@ flowchart TD
    [`BookingInputSchema.safeParse`](../src/schemas/booking.ts) check các field đã merge (rule
    `.refine()` của nó yêu cầu `dates.end` cho hotel) — thiếu field thì dừng ngay ở đây, hỏi lại
    user, không bao giờ đoán.
-4. **Gọi tool (deterministic, không phải model chọn).** Khi đã hợp lệ, code — không phải model —
-   gọi `searchHotel` (export từ [`mcp/client.ts`](../src/mcp/client.ts)). Đây **không phải** 1
-   lệnh gọi hàm bình thường trong cùng process — nó băng qua ranh giới 2 process riêng biệt:
-   - `client.ts` là **MCP client**, chạy trong process của agent. Tự nó **không có logic tool
-     nào cả**, chỉ biết gửi `client.callTool({ name: 'search_hotels', arguments })`.
-   - Lần gọi đầu tiên, `client.ts` tự spawn 1 **process con riêng** chạy
-     [`mcp/booking-server.ts`](../src/mcp/booking-server.ts) (**MCP server** — nơi thật sự có
-     `server.registerTool(...)`), nói chuyện với nó qua **stdio** (stdin/stdout của process con,
-     không phải network) — giống browser (client) gọi web server, chỉ khác chạy local.
-   - `booking-server.ts` nhận request, gọi [`mcp/booking-actions.ts`](../src/mcp/booking-actions.ts)
-     → `apiGet()` → API mock thật (đường đi giống hệt `weatherTool` gọi API weather), rồi trả
-     kết quả ngược lại qua stdio cho `client.ts`.
+4. **Gọi tool (deterministic, không phải model chọn) — chuỗi gọi thật, băng qua 2 process:**
+   1. [`bookingAgent`](../src/nodes/booking-agent.ts) validate xong slot → gọi `searchHotel({...})`.
+      Hàm này **import từ [`mcp/client.ts`](../src/mcp/client.ts)**
+      ([booking-agent.ts:32](../src/nodes/booking-agent.ts#L32)), không phải từ
+      `booking-actions.ts` trực tiếp.
+   2. **`mcp/client.ts`** nhận lệnh — nó chỉ là wrapper gọi `callBookingTool(TOOL_NAME.SEARCH_HOTELS, params, HotelResultSchema)`,
+      lấy MCP client instance (spawn subprocess nếu chưa có), rồi gọi
+      `client.callTool({ name: 'search_hotels', arguments: params })` — gửi request này qua
+      **stdio** sang process con.
+   3. Request tới **[`mcp/booking-server.ts`](../src/mcp/booking-server.ts)** (chạy trong
+      process con riêng), đã đăng ký sẵn tool `search_hotels` qua `server.registerTool(...)`.
+      **Ở đây booking-server.ts làm việc thật**: handler của nó gọi tiếp `searchHotel(input)` —
+      lần này là 1 hàm **khác**, import từ `booking-actions.ts` (cùng tên `searchHotel` nhưng 2
+      file khác nhau, làm 2 việc khác nhau — dễ nhầm).
+   4. **[`mcp/booking-actions.ts`](../src/mcp/booking-actions.ts)**'s `searchHotel()` mới là nơi
+      gọi `apiGet()` thật — bắn HTTP GET tới mock booking API (`API_ENDPOINT.HOTELS_AVAILABILITY`,
+      đường đi giống hệt `weatherTool` gọi API weather), validate response bằng
+      `HotelSearchResponseSchema` (Zod), map thành `HotelResult[]`.
+   5. Kết quả đi ngược lại: `booking-actions.ts` → `booking-server.ts` (bọc thành
+      `{ content: [{ type: 'text', text: JSON.stringify({status:'ok', response}) }] }`) → qua
+      stdio → `mcp/client.ts`'s `callBookingTool` nhận, parse JSON, validate lại 1 lần nữa bằng
+      Zod (`parseToolEnvelope`) → trả `HotelResult[]` về cho `bookingAgent`.
 
-   Đây là chỗ Agent/Model/Tool tương tác duy nhất trong graph cố tình bỏ qua `bindTools` — việc duy nhất của model là trích slot ở bước 2. Kết quả trả về (`results` — danh sách
-   khách sạn) chỉ nằm trong biến local của node, **chưa gửi cho user**.
-5. **Interrupt — dừng chờ người.** `promptHotelSelection` trong
-   [`booking-agent.ts`](../src/nodes/booking-agent.ts) gọi `interrupt()` của LangGraph, gửi option
-   hotel cho client và dừng graph giữa chừng node. [`PostgresSaver`](../src/db/checkpointer.ts)
-   đã checkpoint mọi thứ tới điểm này rồi — chỗ dừng (và context của chuyến đi) sẽ sống sót nếu
-   agent process bị restart.
+   Đây là chỗ Agent/Model/Tool tương tác duy nhất trong graph cố tình bỏ qua `bindTools` (xem
+   §2) — việc duy nhất của model là trích slot ở bước 2. Kết quả trả về (`results` — danh sách
+   khách sạn) chỉ nằm trong biến local của node, **chưa gửi cho user** — nó sẽ là payload cho
+   bước 5 ngay sau đây, trong cùng 1 lần chạy node, chưa return khỏi `bookingAgent`.
+5. **Interrupt — dừng chờ người.** Vẫn trong cùng lần chạy đó, `promptHotelSelection(results)`
+   ([`booking-agent.ts`](../src/nodes/booking-agent.ts)) gọi
+   `interrupt({ type: 'select_hotel', options: results })` của LangGraph. `interrupt()` **không
+   return bình thường** — nó **throw** 1 exception đặc biệt (`GraphInterrupt`). Exception này
+   không phải lỗi: LangGraph runtime bắt nó ở tầng thực thi graph (ngoài code app), gửi
+   `payload` (danh sách khách sạn) ra cho client, rồi **checkpoint state hiện tại** qua
+   [`PostgresSaver`](../src/db/checkpointer.ts) và dừng graph **đúng ngay tại dòng gọi
+   `interrupt()`** — mọi code sau dòng đó (kể cả phần còn lại của `promptHotelSelection` và
+   `bookingAgent`) chưa chạy tới. Vì đây là 1 exception unwind cả call stack, comment trong code
+   cố tình cảnh báo: chỉ bọc `try/catch` quanh `searchHotel` ở bước 4 (API call thật, có thể
+   lỗi), **không** bọc quanh `promptHotelSelection` — bắt nhầm `GraphInterrupt` ở đây sẽ phá vỡ
+   hẳn cơ chế pause/resume. Nhờ đã checkpoint, chỗ dừng (và toàn bộ context chuyến đi) sống sót
+   qua cả restart agent process — user có thể quay lại chọn sau nhiều giờ/ngày, checkpoint vẫn
+   còn nguyên. Khi resume (bước 7), LangGraph replay lại đúng điểm này với giá trị resume thay
+   cho `interrupt()`, nên `while (true)` bên trong `promptHotelSelection` có thể gọi
+   `interrupt()` thêm lần nữa (báo lỗi chọn sai id) mà vẫn nằm trong cùng 1 "lượt dừng" logic.
 6. **Stream trực tiếp về client.** Event interrupt stream sang frontend qua cùng 1 kết nối
    (không polling) — `useInterrupt()` trong
    [`use-booking-selection-interrupt.tsx`](../../web/src/hooks/use-booking-selection-interrupt.tsx)
