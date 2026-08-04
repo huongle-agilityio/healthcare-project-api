@@ -36,6 +36,8 @@
   - [12. Đi từ đầu đến cuối 1 flow: booking khách sạn (map với target LangChain/LangGraph)](#12-đi-từ-đầu-đến-cuối-1-flow-booking-khách-sạn-map-với-target-langchainlanggraph)
   - [13. Known issue — HITL booking re-render sau mỗi lần select](#13-known-issue--hitl-booking-re-render-sau-mỗi-lần-select)
   - [14. Target checklist — LangChainJS \& LangGraph](#14-target-checklist--langchainjs--langgraph)
+    - [LangChainJS](#langchainjs)
+    - [LangGraph](#langgraph)
 
 ## 1. Vì sao tách nhiều node riêng thay vì 1 agent to duy nhất?
 
@@ -281,6 +283,47 @@ Map nhanh trước, rồi đi từng bước kèm link file.
 | Long-running task & state recovery             | `PostgresSaver` checkpoint state sau mỗi bước — 1 interrupt đang pause vẫn sống sót qua 1 lần restart server                       |
 | Interrupt & time travel                        | `interrupt()` trong `booking-agent.ts`; fork qua `getStateHistory`/`updateState` (§11)                                             |
 | Integrated AI system (LangChainJS + LangGraph) | Model LangChain + schema zod + gọi tool, tất cả chạy như 1 node bên trong graph của LangGraph                                      |
+
+**Sơ đồ** — mỗi node ghi kèm file thật thi hành bước đó:
+
+```mermaid
+flowchart TD
+  U(["User: Book a hotel in Da Nang, Aug 1-5, 2 travelers"])
+
+  subgraph AG["apps/agent (LangGraph)"]
+    direction TB
+    N1["1. load-context.ts + intent-classification.ts<br/>intent = booking, Command(goto: bookingAgent)"]
+    N2["2. booking-agent.ts<br/>largeModel.withStructuredOutput<br/>(prompts/booking-slot-extraction.ts)"]
+    N3{"3. BookingInputSchema.safeParse<br/>(schemas/booking.ts)"}
+    N3a["thiếu field → hỏi lại user<br/>(booking-agent.ts)"]
+    N4["4. booking-agent.ts<br/>code gọi thẳng searchHotel (không bindTools)"]
+    N4a["mcp/client.ts — MCP client"]
+    N4b["mcp/booking-server.ts — MCP server<br/>(subprocess riêng)"]
+    N4c["mcp/booking-actions.ts<br/>apiGet() → mock booking API"]
+    N5["5. booking-agent.ts<br/>promptHotelSelection → interrupt()"]
+    CKPT[("db/checkpointer.ts<br/>PostgresSaver — checkpoint")]
+    N7["7. resume tại interrupt()<br/>SelectionResumeSchema"]
+    N8["8. memory-capture.ts"]
+    N9["responder.ts — câu trả lời cuối"]
+  end
+
+  subgraph WEB["apps/web (CopilotKit)"]
+    direction TB
+    N6["6. use-booking-selection-interrupt.tsx<br/>useInterrupt() nhận SSE"]
+    N6b["HotelResultsList.tsx"]
+    P(["User chọn 1 khách sạn"])
+  end
+
+  U --> N1 --> N2 --> N3
+  N3 -- thiếu field --> N3a
+  N3 -- đủ field --> N4 --> N4a --> N4b --> N4c
+  N4c --> N5
+  N5 --> CKPT
+  N5 -. SSE stream .-> N6 --> N6b --> P
+  P -. resolve selectedId .-> N7 --> N8 --> N9
+  N9 --> D(["Itinerary cập nhật + trả lời cuối"])
+  N9 -. đổi ý sau .-> FORK["9. api/booking-fork/route.ts<br/>time travel — fork checkpoint (§11)"]
+```
 
 **Từng bước** — user gõ "Book a hotel in Da Nang, Aug 1–5, 2 travelers":
 
