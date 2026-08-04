@@ -1,61 +1,78 @@
-# 🚀 Getting started with Strapi
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { Client } from '@langchain/langgraph-sdk';
 
-Strapi comes with a full featured [Command Line Interface](https://docs.strapi.io/dev-docs/cli) (CLI) which lets you scaffold and manage your project in seconds.
+// Constants
+import { AGENT_URL, BOOKING_FORK_HISTORY_LIMIT } from '@/constants';
 
-### `develop`
+// Schemas
+import { ItineraryItemSchema } from '@repo/schemas';
 
-Start your Strapi application with autoReload enabled. [Learn more](https://docs.strapi.io/dev-docs/cli#strapi-develop)
+// Utils
+import { parseItineraryItems } from '@/utils';
 
-```
-npm run develop
-# or
-yarn develop
-```
+// Types
+import type { ItineraryItem } from '@repo/types';
 
-### `start`
+const RequestSchema = z.object({
+  threadId: z.string(),
+  itemId: z.string(),
+  newItem: ItineraryItemSchema,
+});
 
-Start your Strapi application with autoReload disabled. [Learn more](https://docs.strapi.io/dev-docs/cli#strapi-start)
+interface ThreadValues {
+  itinerary?: unknown;
+}
 
-```
-npm run start
-# or
-yarn start
-```
+/**
+ * "Change my mind" on an already-confirmed flight/hotel — genuine LangGraph time travel:
+ * `getHistory` walks the thread's checkpoint history to find the checkpoint where the item was
+ * actually confirmed (rather than assuming it's simply "the newest"), then `updateState` forks
+ * a new checkpoint off of it (same mechanism as `apps/agent/src/__tests__/time-travel.test.ts`).
+ * This deliberately rewinds the thread: `itinerary` uses a pure-overwrite reducer and any
+ * channel not passed to `updateState` (messages, other itinerary items) carries over from that
+ * *old* checkpoint, not the latest one — anything added after the original confirmation is left
+ * behind on the pre-fork branch (still reachable via that checkpoint), not merged into the fork.
+ * That's inherent to real time travel, not a bug to work around.
+ */
+export async function POST(request: Request) {
+  const body: unknown = await request.json();
+  const parsed = RequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
 
-### `build`
+  const { threadId, itemId, newItem } = parsed.data;
+  const client = new Client({ apiUrl: AGENT_URL });
 
-Build your admin panel. [Learn more](https://docs.strapi.io/dev-docs/cli#strapi-build)
+  const history = await client.threads.getHistory<ThreadValues>(threadId, {
+    limit: BOOKING_FORK_HISTORY_LIMIT,
+  });
 
-```
-npm run build
-# or
-yarn build
-```
+  let confirmedSnapshot: (typeof history)[number] | undefined;
+  let confirmedItinerary: ItineraryItem[] = [];
 
-## ⚙️ Deployment
+  for (const snapshot of history) {
+    const itinerary = parseItineraryItems(snapshot.values.itinerary);
+    if (itinerary.some((item) => item.id === itemId)) {
+      confirmedSnapshot = snapshot;
+      confirmedItinerary = itinerary;
+      break;
+    }
+  }
 
-Strapi gives you many possible deployment options for your project including [Strapi Cloud](https://cloud.strapi.io). Browse the [deployment section of the documentation](https://docs.strapi.io/dev-docs/deployment) to find the best solution for your use case.
+  if (!confirmedSnapshot) {
+    return NextResponse.json({ error: 'Original booking checkpoint not found' }, { status: 404 });
+  }
 
-```
-yarn strapi deploy
-```
+  const nextItinerary: ItineraryItem[] = confirmedItinerary.map((item) =>
+    item.id === itemId ? newItem : item
+  );
 
-## 📚 Learn more
+  await client.threads.updateState<{ itinerary: ItineraryItem[] }>(threadId, {
+    values: { itinerary: nextItinerary },
+    checkpoint: confirmedSnapshot.checkpoint,
+  });
 
-- [Resource center](https://strapi.io/resource-center) - Strapi resource center.
-- [Strapi documentation](https://docs.strapi.io) - Official Strapi documentation.
-- [Strapi tutorials](https://strapi.io/tutorials) - List of tutorials made by the core team and the community.
-- [Strapi blog](https://strapi.io/blog) - Official Strapi blog containing articles made by the Strapi team and the community.
-- [Changelog](https://strapi.io/changelog) - Find out about the Strapi product updates, new features and general improvements.
-
-Feel free to check out the [Strapi GitHub repository](https://github.com/strapi/strapi). Your feedback and contributions are welcome!
-
-## ✨ Community
-
-- [Discord](https://discord.strapi.io) - Come chat with the Strapi community including the core team.
-- [Forum](https://forum.strapi.io/) - Place to discuss, ask questions and find answers, show your Strapi project and get feedback or just talk with other Community members.
-- [Awesome Strapi](https://github.com/strapi/awesome-strapi) - A curated list of awesome things related to Strapi.
-
----
-
-<sub>🤫 Psst! [Strapi is hiring](https://strapi.io/careers).</sub>
+  return NextResponse.json({ ok: true });
+}
