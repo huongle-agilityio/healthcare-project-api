@@ -1,29 +1,8 @@
 # Agent Graph Architecture
 
-## TL;DR
-
-- **Pattern**: supervisor/router — `intentClassification` phân loại ý định, rồi `Command({ goto })`
-  route sang 1 trong 6 node domain (weather/places/booking/policy/memory/responder). Không gộp
-  thành 1 agent vì: routing kém chính xác hơn khi nhiều tool mô tả giống nhau, `bookingAgent` cần
-  `interrupt()` cho human-in-the-loop, mỗi domain cần model khác nhau (`largeModel` vs
-  `smallModel`), và mỗi domain có reducer state + test riêng.
-- **2 kiểu node**: "function node" (không gọi LLM, chỉ plumbing — vd `load-context.ts`) vs "agent
-  node" (`bindTools`, model tự quyết định gọi gì — weather/places/policy/memory).
-  `booking-agent.ts` là ngoại lệ: gọi thẳng MCP tool (không `bindTools`) để kiểm soát chắc chắn
-  việc pause/resume.
-- **Memory**: short-term (message/state theo từng thread) = checkpointer `PostgresSaver`;
-  long-term (preference/profile theo từng user) = `PostgresStore`, 2 key (`travel`, `profile`)
-  trong 1 namespace. Không tự động chèn vào context — chỉ load khi `memoryAgent` gọi
-  `recall_memory`.
-- **DB**: 7 bảng — 6 bảng do `@langchain/langgraph-checkpoint-postgres` tự tạo (checkpoint\* +
-  store), 1 bảng tự viết (`policy_chunks` cho RAG).
-- **Gap đã biết**: chưa có bước trim/summarize message — `messages` phình vô hạn theo từng
-  thread, chi phí tăng tuyến tính theo số turn.
-
 ## Mục lục
 
 - [Agent Graph Architecture](#agent-graph-architecture)
-  - [TL;DR](#tldr)
   - [Mục lục](#mục-lục)
   - [1. Vì sao tách nhiều node riêng thay vì 1 agent to duy nhất?](#1-vì-sao-tách-nhiều-node-riêng-thay-vì-1-agent-to-duy-nhất)
   - [2. Từng node: model, kiểu, tool](#2-từng-node-model-kiểu-tool)
@@ -38,6 +17,11 @@
   - [14. Target checklist — LangChainJS \& LangGraph](#14-target-checklist--langchainjs--langgraph)
     - [LangChainJS](#langchainjs)
     - [LangGraph](#langgraph)
+- [FEATURES](#features)
+  - [1. Booking](#1-booking)
+  - [2. RAG](#2-rag)
+  - [3. Threads](#3-threads)
+  - [4. Time travel](#4-time-travel)
 
 ## 1. Vì sao tách nhiều node riêng thay vì 1 agent to duy nhất?
 
@@ -89,39 +73,38 @@ tool gì.
 
 ## 3. Flow của graph
 
-đầu tiền là sẽ load context
-sau đó agent sẽ dựa theo message user hỏi để pick agent tương ứng
-với agent booking thì sẽ sử dụng mcp local
-và có HITL để user có thể interract
-còn với agent weather/ place thì sẽ gọi thẳng api
-3 agent này sẽ thông qua một lớp memory capture để check xem user có để cập đến sở thích hay tt cá nhân ko để lưu vào long memory
-còn **policy agent** embed câu hỏi của user → tìm chunk đã lưu sẵn → dùng chunk đó để trả lời có trích dẫn
-**memory agent** thì save/ get long memory của user
-rồi tất cả sẽ về phần response để agent trả lời user
-tiếp đến trl xong sẽ lưu lại ở **checkpoint** - doan nay thật ra được ghi sau mỗi bước của graph
+- đầu tiền là sẽ load context
+- sau đó agent sẽ dựa theo message user hỏi để pick agent tương ứng
+- với agent booking thì sẽ sử dụng mcp local
+  và có HITL để user có thể interract
+- còn với agent weather/ place thì sẽ gọi thẳng api
+- 3 agent này sẽ thông qua một lớp memory capture để check xem user có để cập đến sở thích hay tt cá nhân ko để lưu vào long memory
+- còn **policy agent** embed câu hỏi của user → tìm chunk đã lưu sẵn → dùng chunk đó để trả lời có trích dẫn
+- **memory agent** thì save/ get long memory của user
+- rồi tất cả sẽ về phần response để agent trả lời user
+- tiếp đến trl xong sẽ lưu lại ở **checkpoint** - doan nay thật ra được ghi sau mỗi bước của graph
 
 ## 4. Memory: short-term vs long-term
 
 short-term = "cuộc chat này đang tới đâu", long-term = "user này là ai".
 
-- **Short-term (per-thread)**: [`src/db/checkpointer.ts`](../src/db/checkpointer.ts) —
+- **Short-term (per-thread) checkpointeR**: [`src/db/checkpointer.ts`](../src/db/checkpointer.ts) —
   `PostgresSaver`, giữ `messages`/state của 1 thread giữa các turn, cho phép `interrupt()`
   pause/resume.
-  checkpoint: (Short-term)
-- MemorySaver → PostgresSaver (hiện tại đang xài) chỉ là đổi "nơi lưu" (RAM → DB) - short memory
-- lưu: toàn bộ state của graph
-- lưu thread id
-- conversation được lưu ở checkpoint blobs
-  → nhớ 1 cuộc hội thoại đang diễn ra (theo thread_id): tin nhắn, slot đã hỏi, itinerary, điểm dừng interrupt()...
+  - MemorySaver → PostgresSaver (hiện tại đang xài) chỉ là đổi "nơi lưu" (RAM → DB) - short memory
+  - lưu: toàn bộ state của graph
+  - lưu thread id
+  - conversation được lưu ở checkpoint blobs
+    → nhớ 1 cuộc hội thoại đang diễn ra (theo thread_id): tin nhắn, slot đã hỏi, itinerary, điểm dừng interrupt()...
 
 - **Long-term (per-user)**:
-- Long-term (store) - lưu "travel preference" của user
-- nhớ về 1 user, xuyên suốt mọi cuộc hội thoại (theo user_id): sở thích, thói quen
-- Mục đích: mở thread hoàn toàn mới vẫn không phải hỏi lại những gì user từng nói ở thread cũ.
-  - [`src/db/store.ts`](../src/db/store.ts) — `PostgresStore`, key theo
-    namespace `['preferences', 'demo-user']` (constants trong
-    [`src/constants/db.ts`](../src/constants/db.ts)). **Không tự động** chèn vào context — chỉ
-    load khi `memoryAgent` gọi `recall_memory`.
+  - Long-term (store) - lưu "travel preference" của user
+  - nhớ về 1 user, xuyên suốt mọi cuộc hội thoại (theo user_id): sở thích, thói quen
+  - Mục đích: mở thread hoàn toàn mới vẫn không phải hỏi lại những gì user từng nói ở thread cũ.
+    - [`src/db/store.ts`](../src/db/store.ts) — `PostgresStore`, key theo
+      namespace `['preferences', 'demo-user']` (constants trong
+      [`src/constants/db.ts`](../src/constants/db.ts)). **Không tự động** chèn vào context — chỉ
+      load khi `memoryAgent` gọi `recall_memory`.
 - **Lưu bằng 2 đường**: `memoryAgent` (intent = memory) và `memoryCapture` (§3) — cả 2 gọi
   chung `saveMemoryTool`/`saveUserProfileTool` ([`src/tools/memory.ts`](../src/tools/memory.ts)),
   không trùng logic.
@@ -346,19 +329,29 @@ flowchart TD
       Hàm này **import từ [`mcp/client.ts`](../src/mcp/client.ts)**
       ([booking-agent.ts:32](../src/nodes/booking-agent.ts#L32)), không phải từ
       `booking-actions.ts` trực tiếp.
-   2. **`mcp/client.ts`** nhận lệnh — nó chỉ là wrapper gọi rồi gửi request này qua
-      **stdio**.
-   3. Request tới **[`mcp/booking-server.ts`](../src/mcp/booking-server.ts)** , đã đăng ký sẵn tool `search_hotels` qua `server.registerTool(...)`.
+   2. **`mcp/client.ts`** nhận lệnh — nó chỉ là wrapper gọi `callBookingTool(TOOL_NAME.SEARCH_HOTELS, params, HotelResultSchema)`,
+      lấy MCP client instance (spawn subprocess nếu chưa có), rồi gọi
+      `client.callTool({ name: 'search_hotels', arguments: params })` — gửi request này qua
+      **stdio** sang process con.
+   3. Request tới **[`mcp/booking-server.ts`](../src/mcp/booking-server.ts)** (chạy trong
+      process con riêng), đã đăng ký sẵn tool `search_hotels` qua `server.registerTool(...)`.
       **Ở đây booking-server.ts làm việc thật**: handler của nó gọi tiếp `searchHotel(input)` —
-      lần này là 1 hàm **khác**, import từ `booking-actions.ts` .
+      lần này là 1 hàm **khác**, import từ `booking-actions.ts` (cùng tên `searchHotel` nhưng 2
+      file khác nhau, làm 2 việc khác nhau — dễ nhầm).
    4. **[`mcp/booking-actions.ts`](../src/mcp/booking-actions.ts)**'s `searchHotel()` mới là nơi
-      gọi `apiGet()` thật — bắn HTTP GET tới mock booking API.
-   5. Kết quả đi ngược lại: `booking-actions.ts` → `booking-server.ts`  → qua
+      gọi `apiGet()` thật — bắn HTTP GET tới mock booking API (`API_ENDPOINT.HOTELS_AVAILABILITY`,
+      đường đi giống hệt `weatherTool` gọi API weather), validate response bằng
+      `HotelSearchResponseSchema` (Zod), map thành `HotelResult[]`.
+   5. Kết quả đi ngược lại: `booking-actions.ts` → `booking-server.ts` (bọc thành
+      `{ content: [{ type: 'text', text: JSON.stringify({status:'ok', response}) }] }`) → qua
       stdio → `mcp/client.ts`'s `callBookingTool` nhận, parse JSON, validate lại 1 lần nữa bằng
       Zod (`parseToolEnvelope`) → trả `HotelResult[]` về cho `bookingAgent`.
 
-   Đây là chỗ Agent/Model/Tool tương tác duy nhất trong graph cố tình bỏ qua `bindTools` việc duy nhất của model là trích slot ở bước 2. Kết quả trả về (`results` — danh sách
-   khách sạn) chỉ nằm trong biến local của node, **chưa gửi cho user**.
+   Đây là chỗ Agent/Model/Tool tương tác duy nhất trong graph cố tình bỏ qua `bindTools` (xem
+   §2) — việc duy nhất của model là trích slot ở bước 2. Kết quả trả về (`results` — danh sách
+   khách sạn) chỉ nằm trong biến local của node, **chưa gửi cho user** — nó sẽ là payload cho
+   bước 5 ngay sau đây, trong cùng 1 lần chạy node, chưa return khỏi `bookingAgent`.
+
 5. **Interrupt — dừng chờ người.** Vẫn trong cùng lần chạy đó, `promptHotelSelection(results)`
    ([`booking-agent.ts`](../src/nodes/booking-agent.ts)) gọi
    `interrupt({ type: 'select_hotel', options: results })` của LangGraph. `interrupt()` **không
@@ -475,3 +468,333 @@ không gói gọn trong 1 flow ví dụ, và liệt kê đủ file cho từng ta
   - Toàn bộ [`nodes/`](../src/nodes) — mỗi file là 1 chỗ model/schema/tool của LangChain chạy như
     1 node bên trong graph LangGraph; [`graph.ts`](../src/graph.ts) lắp các node đó lại thành 1
     hệ thống hoàn chỉnh.
+
+# FEATURES
+
+Index riêng cho từng feature lớn — mỗi mục tự chứa đủ sơ đồ + từng bước, không chỉ trỏ đi chỗ
+khác. (Bản tiếng Anh riêng từng feature: [`docs/booking-flow.md`](./booking-flow.md),
+[`docs/rag-flow.md`](./rag-flow.md), [`docs/time-travel-flow.md`](./time-travel-flow.md).)
+
+## 1. Booking
+
+Đặt vé máy bay/khách sạn qua HITL (`interrupt()`/resume), tool call đi qua MCP local (subprocess
+riêng, không `bindTools`).
+
+**Sơ đồ** — mỗi node ghi kèm file thật thi hành bước đó:
+
+```mermaid
+flowchart TD
+  U(["User: Book a hotel in Da Nang, Aug 1-5, 2 travelers"])
+
+  subgraph AG["apps/agent (LangGraph)"]
+    direction TB
+    N1["1. load-context.ts + intent-classification.ts<br/>intent = booking, Command(goto: bookingAgent)"]
+    N2["2. booking-agent.ts<br/>largeModel.withStructuredOutput<br/>(prompts/booking-slot-extraction.ts)"]
+    N3{"3. BookingInputSchema.safeParse<br/>(schemas/booking.ts)"}
+    N3a["thiếu field → hỏi lại user<br/>(booking-agent.ts)"]
+    N4["4. booking-agent.ts<br/>code gọi thẳng searchHotel (không bindTools)"]
+    N4a["mcp/client.ts<br/>MCP client — process agent"]
+    N4b["mcp/booking-server.ts<br/>MCP server — process con riêng"]
+    N4c["mcp/booking-actions.ts<br/>apiGet() → mock booking API"]
+    N5["5. booking-agent.ts<br/>promptHotelSelection → interrupt()"]
+    CKPT[("db/checkpointer.ts<br/>PostgresSaver — checkpoint")]
+    N7["7. resume tại interrupt()<br/>SelectionResumeSchema"]
+    N8["8. memory-capture.ts"]
+    N9["responder.ts — câu trả lời cuối"]
+  end
+
+  subgraph WEB["apps/web (CopilotKit)"]
+    direction TB
+    N6["6. use-booking-selection-interrupt.tsx<br/>useInterrupt() nhận SSE"]
+    N6b["HotelResultsList.tsx"]
+    P(["User chọn 1 khách sạn"])
+  end
+
+  U --> N1 --> N2 --> N3
+  N3 -- thiếu field --> N3a
+  N3 -- đủ field --> N4 --> N4a
+  N4a -. spawn subprocess + stdio .-> N4b --> N4c
+  N4c -. kết quả qua stdio .-> N4a --> N5
+  N5 --> CKPT
+  N5 -. SSE stream .-> N6 --> N6b --> P
+  P -. resolve selectedId .-> N7 --> N8 --> N9
+  N9 --> D(["Itinerary cập nhật + trả lời cuối"])
+  N9 -. đổi ý sau .-> FORK["9. api/booking-fork/route.ts<br/>time travel — fork checkpoint (§4 dưới)"]
+```
+
+**Từng bước** — user gõ "Book a hotel in Da Nang, Aug 1–5, 2 travelers":
+
+1. **Routing.** `START → `[`loadContext`](../src/nodes/load-context.ts)`→`[`intentClassification`](../src/nodes/intent-classification.ts) —
+   phân loại `intent = "booking"` qua [`IntentSchema`](../src/schemas/intent.ts) (`deterministicModel`,
+   structured output, không gọi tool), rồi `Command({ goto: bookingAgent })` — khai báo trong
+   [`graph.ts`](../src/graph.ts).
+2. **Trích slot (Model).** [`bookingAgent`](../src/nodes/booking-agent.ts) gọi
+   `largeModel.withStructuredOutput(BookingSlotsSchema)` với template
+   [`bookingSlotExtractionPrompt`](../src/prompts/booking-slot-extraction.ts) (1 `SystemMessage`
+   - toàn bộ `state.messages` làm context) — trích `type`/`destination`/`dates`/`travelers`,
+     merge với những gì còn sót lại trong state từ turn trước.
+3. **Validate schema.** Vẫn trong [`booking-agent.ts`](../src/nodes/booking-agent.ts):
+   [`BookingInputSchema.safeParse`](../src/schemas/booking.ts) check các field đã merge (rule
+   `.refine()` của nó yêu cầu `dates.end` cho hotel) — thiếu field thì dừng ngay ở đây, hỏi lại
+   user, không bao giờ đoán.
+4. **Gọi tool (deterministic, không phải model chọn) — chuỗi gọi thật, băng qua 2 process:**
+   1. [`bookingAgent`](../src/nodes/booking-agent.ts) validate xong slot → gọi `searchHotel({...})`.
+      Hàm này **import từ [`mcp/client.ts`](../src/mcp/client.ts)**
+      ([booking-agent.ts:32](../src/nodes/booking-agent.ts#L32)), không phải từ
+      `booking-actions.ts` trực tiếp.
+   2. **`mcp/client.ts`** nhận lệnh — nó chỉ là wrapper gọi `callBookingTool(TOOL_NAME.SEARCH_HOTELS, params, HotelResultSchema)`,
+      lấy MCP client instance (spawn subprocess nếu chưa có), rồi gọi
+      `client.callTool({ name: 'search_hotels', arguments: params })` — gửi request này qua
+      **stdio** sang process con.
+   3. Request tới **[`mcp/booking-server.ts`](../src/mcp/booking-server.ts)** (chạy trong
+      process con riêng), đã đăng ký sẵn tool `search_hotels` qua `server.registerTool(...)`.
+      **Ở đây booking-server.ts làm việc thật**: handler của nó gọi tiếp `searchHotel(input)` —
+      lần này là 1 hàm **khác**, import từ `booking-actions.ts` (cùng tên `searchHotel` nhưng 2
+      file khác nhau, làm 2 việc khác nhau — dễ nhầm).
+   4. **[`mcp/booking-actions.ts`](../src/mcp/booking-actions.ts)**'s `searchHotel()` mới là nơi
+      gọi `apiGet()` thật — bắn HTTP GET tới mock booking API (`API_ENDPOINT.HOTELS_AVAILABILITY`,
+      đường đi giống hệt `weatherTool` gọi API weather), validate response bằng
+      `HotelSearchResponseSchema` (Zod), map thành `HotelResult[]`.
+   5. Kết quả đi ngược lại: `booking-actions.ts` → `booking-server.ts` (bọc thành
+      `{ content: [{ type: 'text', text: JSON.stringify({status:'ok', response}) }] }`) → qua
+      stdio → `mcp/client.ts`'s `callBookingTool` nhận, parse JSON, validate lại 1 lần nữa bằng
+      Zod (`parseToolEnvelope`) → trả `HotelResult[]` về cho `bookingAgent`.
+
+   Kết quả trả về (`results` — danh sách khách sạn) chỉ nằm trong biến local của node, **chưa
+   gửi cho user** — nó sẽ là payload cho bước 5 ngay sau đây, trong cùng 1 lần chạy node, chưa
+   return khỏi `bookingAgent`.
+5. **Interrupt — dừng chờ người.** Vẫn trong cùng lần chạy đó, `promptHotelSelection(results)`
+   ([`booking-agent.ts`](../src/nodes/booking-agent.ts)) gọi
+   `interrupt({ type: 'select_hotel', options: results })` của LangGraph. `interrupt()` **không
+   return bình thường** — nó **throw** 1 exception đặc biệt (`GraphInterrupt`). LangGraph runtime
+   bắt nó ở tầng thực thi graph (ngoài code app), gửi `payload` (danh sách khách sạn) ra cho
+   client, rồi **checkpoint state hiện tại** qua [`PostgresSaver`](../src/db/checkpointer.ts) và
+   dừng graph **đúng ngay tại dòng gọi `interrupt()`**. Nhờ đã checkpoint, chỗ dừng (và toàn bộ
+   context chuyến đi) sống sót qua cả restart agent process.
+6. **Stream trực tiếp về client.** Event interrupt stream sang frontend qua cùng 1 kết nối
+   (không polling) — `useInterrupt()` trong
+   [`use-booking-selection-interrupt.tsx`](../../web/src/hooks/use-booking-selection-interrupt.tsx)
+   nhận event và render
+   [`HotelResultsList`](../../web/src/components/travel-list/HotelResultsList.tsx) như 1
+   card chọn lựa sống động.
+7. **Resume.** User chọn 1 khách sạn → card gọi `resolve({ selectedId })` → frontend gửi
+   `graph.invoke(new Command({ resume: { selectedId } }))`, resume đúng ngay chỗ `bookingAgent`
+   đang pause ở `interrupt()`, được validate bằng `SelectionResumeSchema`.
+8. **Hoàn tất.** Hotel được map thành 1 item trong itinerary, `destination`/`dates`/`travelers`
+   được xoá (để booking tiếp theo không liên quan không bị thừa kế nhầm), rồi
+   [`memoryCapture`](../src/nodes/memory-capture.ts) tranh thủ check turn này xem có preference
+   nào lỡ chèn vào không, và [`responder`](../src/nodes/responder.ts) viết câu trả lời cuối.
+9. **Bonus — time travel.** Đổi ý về đúng booking này sau đó chính là §4 dưới đây.
+
+## 2. RAG
+
+Trả lời câu hỏi booking policy bằng cách embed câu hỏi rồi tìm chunk gần nhất qua pgvector cosine
+search. 2 flow tách biệt, chạy ở 2 thời điểm khác nhau: **ingestion** (offline, chạy 1 lần qua
+CLI) và **retrieval** (runtime, mỗi câu hỏi của user).
+
+**Sơ đồ:**
+
+```mermaid
+flowchart TD
+  subgraph ING["Ingestion — offline, 1 lần (chạy `tsx rag/ingest.ts`)"]
+    direction TB
+    C["rag/corpus/booking-policy.md<br/>5 section, 1 section/heading ##"]
+    SPLIT["rag/split-markdown.ts<br/>splitMarkdownSections()"]
+    VAL["schemas/policy.ts<br/>PolicyChunkSchema.safeParse()<br/>chunk lỗi → skip, không fatal"]
+    EMB1["models/index.ts<br/>textEmbeddingModel.embedQuery()<br/>(text-embedding-3-small)"]
+    INS["rag/ingest.ts<br/>insertPolicyChunk()<br/>INSERT INTO policy_chunks"]
+    DB1[("Postgres — policy_chunks<br/>(cột pgvector)")]
+  end
+
+  subgraph RT["Retrieval — mỗi câu hỏi của user"]
+    direction TB
+    U(["User: Chính sách huỷ vé thế nào?"])
+    IC["intent-classification.ts<br/>intent = policy"]
+    PA["policy-agent.ts<br/>deterministicModel.bindTools([policyTool])"]
+    PT["tools/policy.ts<br/>policyTool"]
+    RP["rag/retrieve-policy.ts<br/>retrievePolicyChunks(question)"]
+    EMB2["textEmbeddingModel.embedQuery(question)"]
+    Q["pgvector cosine search<br/>embedding &lt;=&gt; $1 &lt;= 0.5<br/>ORDER BY distance LIMIT 3"]
+    RESP["responder.ts<br/>viết câu trả lời kèm trích dẫn"]
+  end
+
+  C --> SPLIT --> VAL --> EMB1 --> INS --> DB1
+
+  U --> IC --> PA --> PT --> RP --> EMB2 --> Q
+  DB1 -. được query bởi .-> Q
+  Q --> RESP
+```
+
+**Ingestion — từng bước** (chạy 1 lần, hoặc mỗi khi corpus đổi, không nằm trong request path):
+
+1. **Đọc corpus.** [`rag/ingest.ts`](../src/rag/ingest.ts)'s `main()` đọc
+   [`rag/corpus/booking-policy.md`](../src/rag/corpus/booking-policy.md) — 5 section ngắn
+   (cancellation, refund, rescheduling, luggage, payment).
+2. **Chia chunk.** [`rag/split-markdown.ts`](../src/rag/split-markdown.ts)'s
+   `splitMarkdownSections()` chia theo từng heading `## ` — text heading thành `title` (và
+   `topic` đã slugify), phần còn lại tới heading tiếp theo thành `content`. Cố tình đơn giản,
+   không chia đệ quy/overlap — corpus chỉ vài section ngắn, đã tách sẵn rõ ràng.
+3. **Validate từng chunk.** `ingestCorpus()` trong `ingest.ts` chạy `PolicyChunkSchema.safeParse()`
+   từng chunk một — 1 chunk sai shape chỉ bị skip (log kèm index/title), phần còn lại của batch
+   vẫn chạy tiếp.
+4. **Embed.** `content` của mỗi chunk hợp lệ qua `textEmbeddingModel.embedQuery()`
+   ([`models/index.ts`](../src/models/index.ts), `text-embedding-3-small`) ra vector 1536 chiều.
+5. **Insert.** `insertPolicyChunk()` chạy raw SQL `INSERT INTO policy_chunks (topic, title,
+   content, embedding) VALUES (...)` — dùng chung `pool` connection với checkpointer
+   ([`db/checkpointer.ts`](../src/db/checkpointer.ts)), chỉ khác bảng.
+6. 1 chunk embed/insert lỗi không chặn cả batch — CLI in tổng kết inserted vs. skipped ở cuối.
+
+**Retrieval — từng bước** — user hỏi "Chính sách huỷ vé máy bay thế nào?":
+
+1. **Routing.** [`intentClassification`](../src/nodes/intent-classification.ts) phân loại
+   `intent = "policy"` qua [`IntentSchema`](../src/schemas/intent.ts), rồi
+   `Command({ goto: policyAgent })`.
+2. **Model tự quyết định có search hay không.** [`policyAgent`](../src/nodes/policy-agent.ts)
+   gọi `deterministicModel.bindTools([policyTool])` với
+   [`POLICY_AGENT_PROMPT`](../src/prompts/policy-agent.ts) — khác `bookingAgent`, chỗ này **có**
+   dùng `bindTools`: model tự quyết định gọi tool `policy` (prompt yêu cầu luôn tra cứu thay vì
+   đoán, nhưng việc gọi tool vẫn do model chủ động, không phải code ép buộc).
+3. **Tool chạy.** [`tools/policy.ts`](../src/tools/policy.ts)'s `policyTool` gọi
+   `retrievePolicyChunks(question)`.
+4. **Embed câu hỏi.** [`rag/retrieve-policy.ts`](../src/rag/retrieve-policy.ts) embed `question`
+   bằng đúng `textEmbeddingModel.embedQuery()` dùng lúc ingestion — câu hỏi và corpus phải nằm
+   chung 1 embedding space.
+5. **pgvector search.** 1 câu SQL sắp `policy_chunks` theo cosine distance (`embedding <=> $1`,
+   toán tử pgvector) tới embedding câu hỏi, chỉ giữ row trong ngưỡng
+   `POLICY_MATCH_MAX_DISTANCE = 0.5`, giới hạn 3 chunk gần nhất.
+6. **Kết quả đi ngược lại.** `policyTool` trả `{ status: 'ok', response: { chunks } }` →
+   `policyAgent` lưu vào `state.toolResult` → [`responder`](../src/nodes/responder.ts) đọc
+   `toolResult`/`messages` viết câu trả lời cuối, trích dẫn chunk khớp. Không có card generative-UI
+   nào render cái này (khác weather/places/booking) — cố tình đọc như câu trả lời có trích dẫn
+   bình thường, không phải data card.
+
+**Node vs. tool**: `policyTool` là tool gọi từ `policyAgent` (agent node) — RAG ở đây là lookup 1
+bước, không cần pause/resume nhiều bước như `bookingAgent`, nhưng model vẫn cần quyết định có gọi
+hay không → đúng kiểu tool trong agent node.
+
+**Phạm vi hiện tại**: thuần pgvector (cosine distance), không có keyword/full-text search — corpus
+chỉ 5 section ngắn, quá nhỏ để vector-only bị nhầm đáng kể. Hybrid (vector + full-text + rerank)
+chưa cần ở quy mô này.
+
+## 3. Threads
+
+Mỗi cuộc hội thoại là 1 thread riêng. 2 tầng tách biệt, không tầng nào biết tầng kia lưu gì:
+
+- **Sidebar (danh mục thread)**: client-side `localStorage`, chỉ `{ id, name }`, không lưu nội
+  dung. Thread chỉ được thêm sau khi có ít nhất 1 message (lazy creation) — mở app lên chưa gõ gì
+  thì chưa có thread nào trong danh mục.
+- **Thread đang active**: qua `useCopilotChatConfiguration` (không phải prop `threadId` truyền
+  trực tiếp) — cần thiết để `<CopilotChat>` biết lúc nào ẩn màn hình welcome.
+- **Nội dung hội thoại thật**: sống trong Postgres qua checkpointer
+  ([`db/checkpointer.ts`](../src/db/checkpointer.ts)), key theo `thread_id`. Đổi active thread =
+  đổi `thread_id` gửi lên agent, LangGraph tự load checkpoint mới nhất của `thread_id` đó — sidebar
+  và agent server hoàn toàn không chia sẻ state, chỉ chia sẻ đúng 1 giá trị: `thread_id`.
+
+Vì "danh mục thread" và "nội dung thread" tách biệt hoàn toàn, xoá 1 thread khỏi sidebar
+(`localStorage`) không xoá dữ liệu thật trong Postgres — chỉ mất đường dẫn tới nó từ UI.
+
+## 4. Time travel
+
+"Time travel" = `getStateHistory()`/`getHistory()` + `updateState()` của LangGraph — duyệt lại
+lịch sử checkpoint của 1 thread, chọn 1 checkpoint cũ, rồi nhánh (fork) nó thành 1 checkpoint
+**mới** mà không đụng vào bản gốc. Dùng cho tính năng "đổi ý" trên 1 chuyến bay/khách sạn đã
+confirm.
+
+**Phần 1 — cơ chế, chứng minh bằng test.**
+[`apps/agent/src/__tests__/time-travel.test.ts`](../src/__tests__/time-travel.test.ts) tự dựng 1
+graph nhỏ (chỉ `bookingAgent` + `MemorySaver`, không Postgres/LLM thật — mock hết):
+
+```mermaid
+flowchart TD
+  A["1. graph.invoke(...) chạy booking tới interrupt()<br/>hotel options được đưa ra"]
+  B["2. graph.invoke(Command({ resume: { selectedId: hotelA.id } }))<br/>confirm hotel A"]
+  C["3. graph.getState(config)<br/>itinerary giờ chứa hotel A"]
+  D["4. for await (snapshot of graph.getStateHistory(config))<br/>duyệt mọi checkpoint, mới nhất trước"]
+  E["5. tìm checkpoint mà<br/>snapshot.values.itinerary lần đầu chứa hotel A"]
+  F["6. graph.updateState(confirmedSnapshot.config,<br/>{ itinerary: [hotelBItem] })<br/>ghi 1 checkpoint MỚI đè lên checkpoint cũ đó"]
+  G["7. graph.getState(confirmedState.config)<br/>— config của CHÍNH checkpoint gốc —<br/>vẫn trả hotel A, không đổi"]
+  H["8. graph.getState(forkedConfig)<br/>trả hotel B; destination/messages<br/>giống hệt ở cả 2 nhánh"]
+
+  A --> B --> C --> D --> E --> F
+  F --> G
+  F --> H
+```
+
+Điểm mấu chốt ở bước 7/8: fork **không mutate lịch sử** — checkpoint gốc vẫn còn nguyên và truy
+được qua chính config của nó; chỉ có checkpoint **mới** (và, từ giờ về sau, con trỏ "mới nhất"
+của thread) mới phản ánh nhánh vừa fork.
+
+**Phần 2 — flow thật, đã nối vào app:**
+
+```mermaid
+flowchart TD
+  subgraph EARLIER["Trước đó — booking được confirm (flow booking bình thường)"]
+    direction TB
+    CF["booking-agent.ts<br/>buildSelectionResultMessages()<br/>ghi tool-call booking_hotel_result"]
+    CKPT0[("Checkpoint PostgresSaver<br/>tại thời điểm confirm")]
+  end
+
+  subgraph UI["apps/web — user đổi ý"]
+    direction TB
+    BTN["itinerary-sidebar-item.tsx<br/>nút 'Change selection'"]
+    FIND["utils/booking-selection.ts<br/>findOriginalOptionsForItem()<br/>quét agent.messages tìm booking_hotel_result"]
+    DLG["change-selection-dialog.tsx<br/>mở lại đúng list khách sạn ban đầu"]
+    PICK(["User chọn khách sạn khác"])
+    HOOK["use-booking-fork-mutation.tsx<br/>optimistic agent.setState()<br/>POST /api/booking-fork"]
+  end
+
+  subgraph ROUTE["apps/web/app/api/booking-fork/route.ts"]
+    direction TB
+    SDK["new Client({ apiUrl: AGENT_URL })<br/>@langchain/langgraph-sdk"]
+    HIST["client.threads.getHistory(threadId,<br/>{ limit: BOOKING_FORK_HISTORY_LIMIT })"]
+    LOOP{"duyệt checkpoint:<br/>itinerary của checkpoint này<br/>có chứa itemId không?"}
+    NF["404 — không tìm thấy checkpoint"]
+    NEXT["build nextItinerary<br/>(item của checkpoint đó,<br/>itemId thay bằng newItem)"]
+    UPD["client.threads.updateState(threadId,<br/>{ values: { itinerary: nextItinerary },<br/>checkpoint: checkpoint tìm được })"]
+  end
+
+  CF --> CKPT0
+  BTN --> FIND --> DLG --> PICK --> HOOK
+  HOOK --> SDK --> HIST --> LOOP
+  LOOP -- không còn checkpoint nào khớp --> NF
+  LOOP -- tìm thấy --> NEXT --> UPD
+  CKPT0 -. đọc qua getHistory .-> HIST
+  UPD --> DONE[("Checkpoint mới =<br/>state mới nhất của thread")]
+```
+
+**Từng bước — flow thật:**
+
+1. **Booking được confirm (trước đó, flow bình thường).** Lúc hotel/flight được confirm,
+   [`booking-agent.ts`](../src/nodes/booking-agent.ts)'s `buildSelectionResultMessages()` ghi 1
+   tool-call `booking_flight_result`/`booking_hotel_result` vào `state.messages` — đây là thứ
+   khiến options gốc còn phục hồi được sau này, và cũng chính là checkpoint sẽ bị fork sau này.
+2. **Nút "Change selection".** [`itinerary-sidebar-item.tsx`](../../web/src/components/itinerary-sidebar/itinerary-sidebar-item.tsx)
+   hiện nút này trên mọi item flight/hotel.
+3. **Phục hồi options gốc.** [`findOriginalOptionsForItem`](../../web/src/utils/booking-selection.ts)
+   quét `agent.messages` (AG-UI shaped) tìm tool-call ở bước 1 khớp id của item này — chỉ khi tìm
+   thấy dialog mới mở (item từ thread có trước feature này thì không có gì để mở lại).
+4. **Dialog mở lại list ban đầu.** [`change-selection-dialog.tsx`](../../web/src/components/itinerary-sidebar/change-selection-dialog.tsx)
+   render lại đúng `FlightResultsList`/`HotelResultsList` user từng thấy.
+5. **User chọn option khác.** Dialog gọi `forkSelection(oldItem, newItem)`.
+6. **Optimistic update + request.** [`use-booking-fork-mutation.tsx`](../../web/src/hooks/use-booking-fork-mutation.tsx)
+   set `agent.state` ngay lập tức (UI phản ánh lựa chọn mới ngay), rồi `POST /api/booking-fork`
+   với `{ threadId, itemId, newItem }`.
+7. **Duyệt lịch sử checkpoint.** [`api/booking-fork/route.ts`](../../web/src/app/api/booking-fork/route.ts)
+   gọi `client.threads.getHistory(threadId, { limit: BOOKING_FORK_HISTORY_LIMIT })` — SDK mặc
+   định `limit` = 10, dễ bỏ sót booking cũ, nên route này truyền `limit` rõ ràng, generous (1000,
+   [`constants/itinerary.ts`](../../web/src/constants/itinerary.ts)).
+8. **Tìm checkpoint.** Duyệt các checkpoint trả về, parse `itinerary` của từng cái
+   ([`parseItineraryItems`](../../web/src/utils/itinerary.ts)) tới khi thấy 1 cái chứa `itemId`.
+   Không thấy → `404`.
+9. **Fork nó.** Build `nextItinerary` từ item của **checkpoint đó** (không phải item mới nhất),
+   thay `itemId` bằng `newItem`, rồi gọi `client.threads.updateState(threadId, { values: {
+   itinerary: nextItinerary }, checkpoint: <checkpoint tìm được> })` — ghi 1 checkpoint mới có
+   parent là checkpoint cũ, và nó trở thành state mới nhất (live) của thread.
+10. **Đánh đổi cố ý.** Item/tin nhắn thêm vào **sau** thời điểm confirm gốc sẽ bị bỏ lại ở nhánh
+    cũ (vẫn còn nguyên, truy được qua checkpoint gốc — không mất dữ liệu) nhưng **không có** trong
+    nhánh vừa fork, vì `itinerary` dùng overwrite reducer
+    ([`states/trip.ts`](../src/states/trip.ts)) và field nào không truyền vào `updateState` (như
+    `messages`) sẽ lấy nguyên giá trị của checkpoint cũ, không phải mới nhất. Đây là bản chất
+    thật của time travel trong LangGraph (giống `git checkout <commit cũ> -b nhánh-mới`), giữ
+    nguyên có chủ đích — đổi sang "patch state mới nhất" sẽ không còn là time travel thật, chỉ là
+    bản sao khác của route `itinerary-state`.
