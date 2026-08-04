@@ -341,9 +341,20 @@ flowchart TD
    `.refine()` của nó yêu cầu `dates.end` cho hotel) — thiếu field thì dừng ngay ở đây, hỏi lại
    user, không bao giờ đoán.
 4. **Gọi tool (deterministic, không phải model chọn).** Khi đã hợp lệ, code — không phải model —
-   gọi thẳng `searchHotel`: [`mcp/booking-actions.ts`](../src/mcp/booking-actions.ts) qua
-   [`mcp/client.ts`](../src/mcp/client.ts). Đây là chỗ Agent/Model/Tool tương tác duy nhất trong
-   graph cố tình bỏ qua `bindTools` (xem §2) — việc duy nhất của model là trích slot ở bước 2.
+   gọi `searchHotel` (export từ [`mcp/client.ts`](../src/mcp/client.ts)). Đây **không phải** 1
+   lệnh gọi hàm bình thường trong cùng process — nó băng qua ranh giới 2 process riêng biệt:
+   - `client.ts` là **MCP client**, chạy trong process của agent. Tự nó **không có logic tool
+     nào cả**, chỉ biết gửi `client.callTool({ name: 'search_hotels', arguments })`.
+   - Lần gọi đầu tiên, `client.ts` tự spawn 1 **process con riêng** chạy
+     [`mcp/booking-server.ts`](../src/mcp/booking-server.ts) (**MCP server** — nơi thật sự có
+     `server.registerTool(...)`), nói chuyện với nó qua **stdio** (stdin/stdout của process con,
+     không phải network) — giống browser (client) gọi web server, chỉ khác chạy local.
+   - `booking-server.ts` nhận request, gọi [`mcp/booking-actions.ts`](../src/mcp/booking-actions.ts)
+     → `apiGet()` → API mock thật (đường đi giống hệt `weatherTool` gọi API weather), rồi trả
+     kết quả ngược lại qua stdio cho `client.ts`.
+
+   Đây là chỗ Agent/Model/Tool tương tác duy nhất trong graph cố tình bỏ qua `bindTools` — việc duy nhất của model là trích slot ở bước 2. Kết quả trả về (`results` — danh sách
+   khách sạn) chỉ nằm trong biến local của node, **chưa gửi cho user**.
 5. **Interrupt — dừng chờ người.** `promptHotelSelection` trong
    [`booking-agent.ts`](../src/nodes/booking-agent.ts) gọi `interrupt()` của LangGraph, gửi option
    hotel cho client và dừng graph giữa chừng node. [`PostgresSaver`](../src/db/checkpointer.ts)
