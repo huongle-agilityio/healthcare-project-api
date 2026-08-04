@@ -346,28 +346,19 @@ flowchart TD
       Hàm này **import từ [`mcp/client.ts`](../src/mcp/client.ts)**
       ([booking-agent.ts:32](../src/nodes/booking-agent.ts#L32)), không phải từ
       `booking-actions.ts` trực tiếp.
-   2. **`mcp/client.ts`** nhận lệnh — nó chỉ là wrapper gọi `callBookingTool(TOOL_NAME.SEARCH_HOTELS, params, HotelResultSchema)`,
-      lấy MCP client instance (spawn subprocess nếu chưa có), rồi gọi
-      `client.callTool({ name: 'search_hotels', arguments: params })` — gửi request này qua
-      **stdio** sang process con.
-   3. Request tới **[`mcp/booking-server.ts`](../src/mcp/booking-server.ts)** (chạy trong
-      process con riêng), đã đăng ký sẵn tool `search_hotels` qua `server.registerTool(...)`.
+   2. **`mcp/client.ts`** nhận lệnh — nó chỉ là wrapper gọi rồi gửi request này qua
+      **stdio**.
+   3. Request tới **[`mcp/booking-server.ts`](../src/mcp/booking-server.ts)** , đã đăng ký sẵn tool `search_hotels` qua `server.registerTool(...)`.
       **Ở đây booking-server.ts làm việc thật**: handler của nó gọi tiếp `searchHotel(input)` —
-      lần này là 1 hàm **khác**, import từ `booking-actions.ts` (cùng tên `searchHotel` nhưng 2
-      file khác nhau, làm 2 việc khác nhau — dễ nhầm).
+      lần này là 1 hàm **khác**, import từ `booking-actions.ts` .
    4. **[`mcp/booking-actions.ts`](../src/mcp/booking-actions.ts)**'s `searchHotel()` mới là nơi
-      gọi `apiGet()` thật — bắn HTTP GET tới mock booking API (`API_ENDPOINT.HOTELS_AVAILABILITY`,
-      đường đi giống hệt `weatherTool` gọi API weather), validate response bằng
-      `HotelSearchResponseSchema` (Zod), map thành `HotelResult[]`.
-   5. Kết quả đi ngược lại: `booking-actions.ts` → `booking-server.ts` (bọc thành
-      `{ content: [{ type: 'text', text: JSON.stringify({status:'ok', response}) }] }`) → qua
+      gọi `apiGet()` thật — bắn HTTP GET tới mock booking API.
+   5. Kết quả đi ngược lại: `booking-actions.ts` → `booking-server.ts`  → qua
       stdio → `mcp/client.ts`'s `callBookingTool` nhận, parse JSON, validate lại 1 lần nữa bằng
       Zod (`parseToolEnvelope`) → trả `HotelResult[]` về cho `bookingAgent`.
 
-   Đây là chỗ Agent/Model/Tool tương tác duy nhất trong graph cố tình bỏ qua `bindTools` (xem
-   §2) — việc duy nhất của model là trích slot ở bước 2. Kết quả trả về (`results` — danh sách
-   khách sạn) chỉ nằm trong biến local của node, **chưa gửi cho user** — nó sẽ là payload cho
-   bước 5 ngay sau đây, trong cùng 1 lần chạy node, chưa return khỏi `bookingAgent`.
+   Đây là chỗ Agent/Model/Tool tương tác duy nhất trong graph cố tình bỏ qua `bindTools` việc duy nhất của model là trích slot ở bước 2. Kết quả trả về (`results` — danh sách
+   khách sạn) chỉ nằm trong biến local của node, **chưa gửi cho user**.
 5. **Interrupt — dừng chờ người.** Vẫn trong cùng lần chạy đó, `promptHotelSelection(results)`
    ([`booking-agent.ts`](../src/nodes/booking-agent.ts)) gọi
    `interrupt({ type: 'select_hotel', options: results })` của LangGraph. `interrupt()` **không
