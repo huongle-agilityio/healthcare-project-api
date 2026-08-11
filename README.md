@@ -577,10 +577,6 @@ memoryCapture kiểm tra message mới nhất và chỉ lưu nếu user có đ�
 tin cá nhân hoặc sở thích.
 
 ## 2. RAG
-
-Booking policy có 1 flow **ingestion** offline và 2 mode runtime: câu hỏi cụ thể dùng pgvector
-retrieval; câu hỏi chung chung lấy danh sách topic trực tiếp từ các chunk đã ingest để hỏi lại user.
-
 **Sơ đồ:**
 
 ```mermaid
@@ -618,66 +614,54 @@ flowchart TD
   DB1 -. được query bởi .-> Q
   Q --> RESP
 ```
+RAG pipeline ở đây được chia thành hai phần: offline ingestion và online retrieval.
 
-**Ingestion — từng bước** (chạy 1 lần, hoặc mỗi khi corpus đổi, không nằm trong request path):
+Đầu tiên là offline ingestion.
 
-1. **Đọc corpus.** [`rag/ingest.ts`](../src/rag/ingest.ts)'s `main()` đọc
-   [`rag/corpus/booking-policy.md`](../src/rag/corpus/booking-policy.md) — 5 section ngắn
-   (cancellation, refund, rescheduling, luggage, payment).
-2. **Chia chunk.** [`rag/split-markdown.ts`](../src/rag/split-markdown.ts)'s
-   `splitMarkdownSections()` chia theo từng heading `## ` — text heading thành `title` (và
-   `topic` đã slugify), phần còn lại tới heading tiếp theo thành `content`. Cố tình đơn giản,
-   không chia đệ quy/overlap — corpus chỉ vài section ngắn, đã tách sẵn rõ ràng.
-3. **Validate từng chunk.** `ingestCorpus()` trong `ingest.ts` chạy `PolicyChunkSchema.safeParse()`
-   từng chunk một — 1 chunk sai shape chỉ bị skip (log kèm index/title), phần còn lại của batch
-   vẫn chạy tiếp.
-4. **Embed.** `content` của mỗi chunk hợp lệ qua `textEmbeddingModel.embedQuery()`
-   ([`models/index.ts`](../src/models/index.ts), `text-embedding-3-small`) ra vector 1536 chiều.
-5. **Insert.** `insertPolicyChunk()` chạy raw SQL `INSERT INTO policy_chunks (topic, title,
-content, embedding) VALUES (...)` — dùng chung `pool` connection với checkpointer
-   ([`db/checkpointer.ts`](../src/db/checkpointer.ts)), chỉ khác bảng.
-6. 1 chunk embed/insert lỗi không chặn cả batch — CLI in tổng kết inserted vs. skipped ở cuối.
+Project có một document booking-policy.md chứa các thông tin liên quan đến
+booking policy.
 
-**Retrieval — từng bước** — user hỏi "Chính sách huỷ vé máy bay thế nào?":
+Document này được đọc và split thành chunk.
 
-1. **Routing.** [`intentClassification`](../src/nodes/intent-classification.ts) phân loại
-   `intent = "policy"` qua [`IntentSchema`](../src/schemas/intent.ts), rồi
-   `Command({ goto: policyAgent })`.
-2. **Model tự quyết định có search hay không.** [`policyAgent`](../src/nodes/policy-agent.ts)
-   gọi `deterministicModel.bindTools([policyTool])` với
-   [`POLICY_AGENT_PROMPT`](../src/prompts/policy-agent.ts) — khác `bookingAgent`, chỗ này **có**
-   dùng `bindTools`: model tự quyết định gọi tool `policy` (prompt yêu cầu luôn tra cứu thay vì
-   đoán, nhưng việc gọi tool vẫn do model chủ động, không phải code ép buộc).
-3. **Tool chọn mode.** [`tools/policy.ts`](../src/tools/policy.ts)'s `policyTool` nhận
-   `mode: "search" | "list_topics"`. Câu hỏi cụ thể gọi `retrievePolicyChunks(question)`;
-   yêu cầu chung như "booking policy" gọi `retrievePolicyTopics()` để lấy title từ DB.
-4. **Embed câu hỏi.** `retrievePolicyChunks` trong
-   [`rag/retrieve-policy.ts`](../src/rag/retrieve-policy.ts) gọi tới
-   [`rag/retrieve.ts`](../src/rag/retrieve.ts)'s `retrieveChunks()` (dùng chung) — hàm này embed
-   `question` bằng đúng `textEmbeddingModel.embedQuery()` dùng lúc ingestion — câu hỏi và corpus
-   phải nằm chung 1 embedding space.
-5. **pgvector search.** `searchByEmbedding()` trong `rag/retrieve.ts` chạy 1 câu SQL — table, các
-   column select, và ngưỡng khoảng cách đều lấy từ config mà `retrieve-policy.ts` truyền vào
-   (`policy_chunks` / `topic, title, content` / `POLICY_MATCH_MAX_DISTANCE = 0.5`), không hard-code
-   trong helper dùng chung — sắp theo cosine distance (`embedding <=> $1`, toán tử pgvector) tới
-   embedding câu hỏi, chỉ giữ row trong ngưỡng, giới hạn 3 chunk gần nhất. Việc tách này (module
-   `rag/retrieve.ts` dùng chung + config riêng của policy trong `retrieve-policy.ts`) là điểm giúp
-   1 corpus khác sau này (vd places) tái sử dụng đúng pipeline embed/search này mà không phải viết
-   lại SQL.
-6. **Kết quả đi ngược lại.** Nhánh search trả
-   `{ status: 'ok', response: { kind: 'answer', chunks } }`; nhánh catalog trả
-   `{ status: 'ok', response: { kind: 'topics', topics } }`. `policyAgent` lưu kết quả vào
-   `state.toolResult`; [`responder`](../src/nodes/responder.ts) hoặc viết câu trả lời có citation,
-   hoặc hỏi user chọn một title đúng như DB trả về và dùng cùng ngôn ngữ với câu hỏi. Không có
-   card generative-UI cho policy.
+Sau đó, từng chunk được validate bằng PolicyChunkSchema.
 
-**Node vs. tool**: `policyTool` là tool gọi từ `policyAgent` (agent node) — RAG ở đây là lookup 1
-bước, không cần pause/resume nhiều bước như `bookingAgent`, nhưng model vẫn cần quyết định có gọi
-hay không → đúng kiểu tool trong agent node.
+Nếu chunk hợp lệ, phần content được đưa qua text-embedding-3 để chuyển
+thành một vector.
 
-**Phạm vi hiện tại**: nhánh trả lời cụ thể dùng thuần pgvector, không có keyword/full-text search;
-nhánh câu hỏi chung dùng SQL metadata (`topic/title`), không dùng embedding. Hybrid
-(vector + full-text + rerank) chưa được triển khai.
+Cuối cùng, insert topic, title, content và embedding vào bảng
+policy_chunks.
+
+Nếu một chunk bị lỗi validation, embedding hoặc insert, hệ thống chỉ skip
+chunk đó và tiếp tục xử lý các chunk còn lại.
+
+
+Phần thứ hai là online retrieval, được thực hiện khi user hỏi về booking policy.
+
+PolicyAgent sử dụng policyTool với hai mode.
+
+Nếu user chỉ hỏi chung chung, ví dụ "booking policy", policyTool sử dụng
+list_topics.
+
+Flow này không tạo embedding và không chạy vector search.
+Nó query topic và title trực tiếp từ policy_chunks -> liệt kê ra các policy -> sau đó agent sẽ hỏi lại
+user muốn tìm hiểu policy nào.
+
+Nếu user hỏi một câu cụ thể -> policyTool sẽ sử dụng search mode.
+
+Câu hỏi của user được chuyển thành query embedding bằng cùng model
+text-embedding-3-small.
+
+Query vector sau đó được so sánh với các chunk embedding trong policy_chunks
+bằng pgvector cosine distance.
+
+Hệ thống lấy tối đa ba chunk phù hợp nhất và chỉ chấp nhận những kết quả có
+distance nhỏ hơn hoặc bằng 0.5.
+
+Các matched chunks được đưa vào context, sau đó responder tạo câu trả lời
+dựa trên nội dung policy đã retrieve và trích dẫn title tương ứng.
+
+Nếu không có chunk đủ liên quan, responder phải nói rằng thông tin đó chưa
+được đề cập trong policy, thay vì tự suy đoán.
 
 ## 3. Threads
 
