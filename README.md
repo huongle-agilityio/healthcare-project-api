@@ -682,35 +682,6 @@ Vì "danh mục thread" và "nội dung thread" tách biệt hoàn toàn, xoá 1
 
 ## 4. Time travel
 
-"Time travel" = `getStateHistory()`/`getHistory()` + `updateState()` của LangGraph — duyệt lại
-lịch sử checkpoint của 1 thread, chọn 1 checkpoint cũ, rồi nhánh (fork) nó thành 1 checkpoint
-**mới** mà không đụng vào bản gốc. Dùng cho tính năng "đổi ý" trên 1 chuyến bay/khách sạn đã
-confirm.
-
-**Phần 1 — cơ chế, chứng minh bằng test.**
-[`apps/agent/src/__tests__/time-travel.test.ts`](../src/__tests__/time-travel.test.ts) tự dựng 1
-graph nhỏ (chỉ `bookingAgent` + `MemorySaver`, không Postgres/LLM thật — mock hết):
-
-```mermaid
-flowchart TD
-  A["1. graph.invoke(...) chạy booking tới interrupt()<br/>hotel options được đưa ra"]
-  B["2. graph.invoke(Command({ resume: { selectedId: hotelA.id } }))<br/>confirm hotel A"]
-  C["3. graph.getState(config)<br/>itinerary giờ chứa hotel A"]
-  D["4. for await (snapshot of graph.getStateHistory(config))<br/>duyệt mọi checkpoint, mới nhất trước"]
-  E["5. tìm checkpoint mà<br/>snapshot.values.itinerary lần đầu chứa hotel A"]
-  F["6. graph.updateState(confirmedSnapshot.config,<br/>{ itinerary: [hotelBItem] })<br/>ghi 1 checkpoint MỚI đè lên checkpoint cũ đó"]
-  G["7. graph.getState(confirmedState.config)<br/>— config của CHÍNH checkpoint gốc —<br/>vẫn trả hotel A, không đổi"]
-  H["8. graph.getState(forkedConfig)<br/>trả hotel B; destination/messages<br/>giống hệt ở cả 2 nhánh"]
-
-  A --> B --> C --> D --> E --> F
-  F --> G
-  F --> H
-```
-
-Điểm mấu chốt ở bước 7/8: fork **không mutate lịch sử** — checkpoint gốc vẫn còn nguyên và truy
-được qua chính config của nó; chỉ có checkpoint **mới** (và, từ giờ về sau, con trỏ "mới nhất"
-của thread) mới phản ánh nhánh vừa fork.
-
 **Phần 2 — flow thật, đã nối vào app:**
 
 ```mermaid
