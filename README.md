@@ -92,10 +92,17 @@ short-term = "cuộc chat này đang tới đâu", long-term = "user này là ai
   `PostgresSaver`, giữ `messages`/state của 1 thread giữa các turn, cho phép `interrupt()`
   pause/resume.
   - MemorySaver → PostgresSaver (hiện tại đang xài) chỉ là đổi "nơi lưu" (RAM → DB) - short memory
-  - lưu: toàn bộ state của graph
-  - lưu thread id
-  - conversation được lưu ở checkpoint blobs
-    → nhớ 1 cuộc hội thoại đang diễn ra (theo thread_id): tin nhắn, slot đã hỏi, itinerary, điểm dừng interrupt()...
+  - Lưu:
+    - thread_id
+    - checkpoint namespace
+    - checkpoint ID
+  - mục đích:
+    - Lưu trữ trạng thái đồ thị và các tin nhắn cho từng luồng hội thoại.
+    - Tiếp tục interrupted bị gián đoạn.
+    - Restore conversation state after reload.
+    - Duy trì thông tin hành trình cho mỗi thread.
+    - support checkpoint history.
+    - support time travel and state forking.  
 
 - **Long-term (per-user)**:
   - Long-term (store) - lưu "travel preference" của user
@@ -105,6 +112,9 @@ short-term = "cuộc chat này đang tới đâu", long-term = "user này là ai
       namespace `['preferences', 'demo-user']` (constants trong
       [`src/constants/db.ts`](../src/constants/db.ts)). **Không tự động** chèn vào context — chỉ
       load khi `memoryAgent` gọi `recall_memory`.
+
+
+      
 - **Lưu bằng 2 đường**: `memoryAgent` (intent = memory) và `memoryCapture` (§3) — cả 2 gọi
   chung `saveMemoryTool`/`saveUserProfileTool` ([`src/tools/memory.ts`](../src/tools/memory.ts)),
   không trùng logic.
