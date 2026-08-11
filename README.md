@@ -749,42 +749,33 @@ flowchart TD
   UPD --> DONE[("Checkpoint mới =<br/>state mới nhất của thread")]
 ```
 
-**Từng bước — flow thật:**
+Part 2 — Time Travel
 
-1. **Booking được confirm (trước đó, flow bình thường).** Lúc hotel/flight được confirm,
-   [`booking-agent.ts`](../src/nodes/booking-agent.ts)'s `buildSelectionResultMessages()` gọi
-   internal result tool trong [`tools/booking-result.ts`](../src/tools/booking-result.ts) để emit
-   card hoàn tất trước responder, rồi persist cặp tool-call/ToolMessage
-   `booking_flight_result`/`booking_hotel_result` vào `state.messages`. AI message dùng lại ID
-   live card để snapshot không reorder; options persist là dữ liệu để phục hồi lựa chọn về sau,
-   và cũng chính là checkpoint sẽ bị fork.
-2. **Nút "Change selection".** [`itinerary-sidebar-item.tsx`](../../web/src/components/itinerary-sidebar/itinerary-sidebar-item.tsx)
-   hiện nút này trên mọi item flight/hotel.
-3. **Phục hồi options gốc.** [`findOriginalOptionsForItem`](../../web/src/utils/booking-selection.ts)
-   quét `agent.messages` (AG-UI shaped) tìm tool-call ở bước 1 khớp id của item này — chỉ khi tìm
-   thấy dialog mới mở (item từ thread có trước feature này thì không có gì để mở lại).
-4. **Dialog mở lại list ban đầu.** [`change-selection-dialog.tsx`](../../web/src/components/itinerary-sidebar/change-selection-dialog.tsx)
-   render lại đúng `FlightResultsList`/`HotelResultsList` user từng thấy.
-5. **User chọn option khác.** Dialog gọi `forkSelection(oldItem, newItem)`.
-6. **Optimistic update + request.** [`use-booking-fork-mutation.tsx`](../../web/src/hooks/use-booking-fork-mutation.tsx)
-   set `agent.state` ngay lập tức (UI phản ánh lựa chọn mới ngay), rồi `POST /api/booking-fork`
-   với `{ threadId, itemId, newItem }`.
-7. **Duyệt lịch sử checkpoint.** [`api/booking-fork/route.ts`](../../web/src/app/api/booking-fork/route.ts)
-   gọi `client.threads.getHistory(threadId, { limit: BOOKING_FORK_HISTORY_LIMIT })` — SDK mặc
-   định `limit` = 10, dễ bỏ sót booking cũ, nên route này truyền `limit` rõ ràng, generous (1000,
-   [`constants/itinerary.ts`](../../web/src/constants/itinerary.ts)).
-8. **Tìm checkpoint.** Duyệt các checkpoint trả về, parse `itinerary` của từng cái
-   ([`parseItineraryItems`](../../web/src/utils/itinerary.ts)) tới khi thấy 1 cái chứa `itemId`.
-   Không thấy → `404`.
-9. **Fork nó.** Build `nextItinerary` từ item của **checkpoint đó** (không phải item mới nhất),
-   thay `itemId` bằng `newItem`, rồi gọi `client.threads.updateState(threadId, { values: {
-itinerary: nextItinerary }, checkpoint: <checkpoint tìm được> })` — ghi 1 checkpoint mới có
-   parent là checkpoint cũ, và nó trở thành state mới nhất (live) của thread.
-10. **Đánh đổi cố ý.** Item/tin nhắn thêm vào **sau** thời điểm confirm gốc sẽ bị bỏ lại ở nhánh
-    cũ (vẫn còn nguyên, truy được qua checkpoint gốc — không mất dữ liệu) nhưng **không có** trong
-    nhánh vừa fork, vì `itinerary` dùng overwrite reducer
-    ([`states/trip.ts`](../src/states/trip.ts)) và field nào không truyền vào `updateState` (như
-    `messages`) sẽ lấy nguyên giá trị của checkpoint cũ, không phải mới nhất. Đây là bản chất
-    thật của time travel trong LangGraph (giống `git checkout <commit cũ> -b nhánh-mới`), giữ
-    nguyên có chủ đích — đổi sang "patch state mới nhất" sẽ không còn là time travel thật, chỉ là
-    bản sao khác của route `itinerary-state`.
+Đầu tiên, user bấm “Change selection” ở itinerary sidebar.
+
+Frontend sẽ scan để tìm booking result tương ứng và lấy lại
+danh sách flight hoặc hotel options đã hiển thị ở lần booking ban đầu.
+
+Nếu tìm thấy options, hệ thống mở modal để user chọn một flight hoặc hotel khác.
+
+Khi user chọn option mới -> sau đó gọi POST /api/booking-fork với:
+- threadId
+- itemId cũ
+- newItem mà user vừa chọn
+
+Ở API route, hệ thống tạo LangGraph SDK Client và gọi getHistory() để lấy
+checkpoint history của thread tương ứng.
+
+Sau đó, route duyệt qua từng checkpoint và kiểm tra itinerary của checkpoint đó có chứa itemId cũ hay không.
+
+Nếu không tìm thấy checkpoint nào chứa item đó, API trả về 404
+
+Nếu tìm thấy, hệ thống lấy itinerary tại chính checkpoint đó và replace item cũ bằng newItem mà user vừa chọn.
+
+Cuối cùng, route gọi updateState() với:
+- itinerary mới
+- checkpoint cũ vừa tìm được
+
+LangGraph không chỉnh sửa checkpoint cũ mà tạo một checkpoint mới có parent là checkpoint cũ đó.
+
+Checkpoint mới trở thành live state hiện tại của thread, còn checkpoint và history ban đầu vẫn được giữ nguyên.
