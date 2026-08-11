@@ -26,6 +26,10 @@
 ## 1. Vì sao tách nhiều node riêng thay vì 1 agent to duy nhất?
 
 **intentClassification** chịu trách nhiệm định tuyến request ban đầu. Còn **supervisor** chỉ điều phối sau khi đã có kết quả weather hoặc places, nhằm kiểm tra xem yêu cầu nhiều bước của user có cần chuyển tiếp sang places, weather hoặc booking hay không.
+  - Đọc toolResult.
+  - Đánh dấu domain đã hoàn thành.
+  - Kiểm tra nextStep model trả về có hợp lệ và chưa chạy hay không.
+  - Route sang weather, places, booking hoặc responder.
 
 Graph là **supervisor/router**: `intentClassification` phân loại ý định rồi `Command({ goto })`
 sang 1 trong 6 node domain. Gộp thành 1 agent bind hết tool sẽ gặp:
