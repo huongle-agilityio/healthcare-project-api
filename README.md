@@ -77,59 +77,12 @@ memoryCapture và booking-result lifecycle gọi trực tiếp; cộng thêm 2 t
 
 ## 3. Flow của graph
 
-State dùng `StateSchema` kết hợp `CopilotKitStateSchema` trong
-[`src/states/trip.ts`](../src/states/trip.ts), gồm messages/UI state và `destination`, `dates`,
-`travelers`, `intent`, `itinerary`, `toolResult`, `pendingRequest`, `responseHandled`,
-`stepsCompleted`.
-`pendingRequest` chỉ tồn tại khi weather/places đang chờ destination và được clear ngay khi lookup
-đã chạy, không phải bản sao toàn bộ conversation history.
-
 - đầu tiền là sẽ load context
 - sau đó agent sẽ dựa theo message user hỏi để pick agent tương ứng
-- với agent booking thì sẽ sử dụng mcp local
-  và có HITL để user có thể interract
-- còn với agent weather/ place thì sẽ gọi thẳng api
-- riêng `weatherAgent` VÀ `placesAgent` xong không đi thẳng qua responder ngay — cả 2 đều ghé
-  qua **`supervisor`** (`nodes/supervisor.ts`) trước: đọc lại tin nhắn gốc của user +
-  `state.stepsCompleted` (domain nào đã chạy trong lượt này) + kết quả vừa có, nếu user còn xin
-  domain nào khác trong 3 domain weather/places/booking (outright hoặc kiểu điều kiện "nếu đẹp
-  thì đặt vé giúp tôi") mà domain đó chưa chạy và điều kiện (nếu có) đã thoả thì
-  `Command({ goto })` sang domain đó luôn trong cùng lượt (không hỏi lại xác nhận trung gian) —
-  còn không thì đi tiếp responder như bình thường. Nhờ vậy câu gộp cả 3 ("thời tiết đẹp không,
-  có chỗ nào chơi không, nếu ổn thì đặt khách sạn luôn") chạy hết cả 3 domain trong 1 lượt, mỗi
-  hop qua `supervisor` lại đánh dấu domain vừa xong vào `stepsCompleted` rồi đánh giá tiếp.
-  `bookingAgent` là node cuối (terminal) — không route ngược lại `supervisor` — nên chain chỉ
-  tối đa 3 hop, và đây là code enforce (không chỉ dựa vào prompt): `supervisor` chỉ tin
-  `nextStep` model trả về nếu domain đó thật sự còn nằm trong danh sách chưa chạy. Chưa áp cho
-  `policyAgent`/`memoryAgent` (không phải "bước tiếp theo" tự nhiên sau 1 lookup, đã xác nhận
-  với user)
-- weather/ places (qua `supervisor` để chain — xem trên)/ booking đi qua
-  **responder** trước. Bình thường responder stream câu trả lời; riêng booking thiếu field thì
-  `bookingAgent` đã append clarification đúng sau card/transition và set `responseHandled`, nên
-  responder chỉ clear cờ, không viết duplicate. Sau đó responder mới
-  conditional-route tiếp qua memoryCapture (dựa vào `state.intent`) để
-  check xem user có đề cập đến sở thích hay tt cá nhân ko để lưu vào long memory — memoryCapture
-  luôn chạy SAU responder, không bao giờ song song với nó: từng thử cho 2 node chạy song song
-  (parallel fan-out) để giảm delay, nhưng 2 lần gọi model stream cùng lúc trên 1 run làm rối cái
-  "message đang stream dở" mà CopilotKit AGUI adapter theo dõi (dùng chung 1 biến cho cả run,
-  không tách theo node) → cắt cụt stream của responder giữa chừng. Nên phải quay lại tuần tự,
-  chỉ đổi chiều: responder trước (visible reply không bị delay), memoryCapture sau theo thứ tự
-  trong cùng graph run; run vẫn chờ memoryCapture hoàn tất rồi mới tới `END`. Đổi lại responder
-  không thấy được kết quả memoryCapture lưu gì trong cùng lượt đó nữa
-- còn **policy agent** chọn 1 trong 2 mode: câu hỏi cụ thể thì embed → tìm chunk đã lưu sẵn →
-  responder trả lời có trích dẫn; câu hỏi policy chung chung thì đọc danh sách `topic/title` từ
-  DB để responder hỏi user muốn xem mục nào (không hardcode danh mục)
-- **memory agent** thì save/ get long memory của user (nối tiếp trước responder — nên vẫn xác
-  nhận được ngay trong lượt đó)
-- rồi tất cả sẽ về phần response để agent trả lời user
-- tiếp đến trl xong sẽ lưu lại ở **checkpoint** - doan nay thật ra được ghi sau mỗi bước của graph
-
-Các model call nội bộ dùng `INTERNAL_MODEL_CONFIG` (`constants/models.ts`) với tag chuẩn
-`nostream` của LangGraph để loại chunk khỏi `messages` stream. CopilotKit còn subscribe raw
-`events`, nên config này đồng thời đặt metadata `emit-messages`/`emit-tool-calls = false` cho
-adapter AG-UI. Vì vậy structured output vẫn chạy và trace được nhưng không đường stream nào làm
-lộ JSON trung gian. `responder` không gắn suppression nên stream text; lifecycle tool render card
-hoàn tất trước, rồi responder stream ở dưới card.
+- với **agent booking** thì sẽ sử dụng mcp local và có HITL để user có thể interract
+- còn với agent weather/ place thì sẽ gọi thẳng api và sẽ đi qua supervisor trước: đọc lại tin nhắn gốc của user + nếu như trong câu hỏi có tool chưa chạy và điều kiện (nếu có) đã thoả thì ->  sang tool đó luôn trong cùng lượt
+- còn **policy agent** embed câu hỏi của user → tìm chunk đã lưu sẵn → dùng chunk đó để trả lời có trích dẫn
+- **memory agent** thì save/ get long memory của user song song với lúc mà agent trả lời câu hỏi của user
 
 ## 4. Memory: short-term vs long-term
 
