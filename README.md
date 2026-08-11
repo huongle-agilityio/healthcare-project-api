@@ -538,78 +538,43 @@ flowchart TD
   D -. đổi ý sau .-> FORK["api/booking-fork/route.ts<br/>time travel — fork checkpoint (§4 dưới)"]
 ```
 
-**Từng bước** — user gõ "Book a hotel in Da Nang, Aug 1–5, 2 travelers":
+Đầu tiên, user gửi yêu cầu tìm khách sạn.
 
-1. **Routing.** `START → `[`loadContext`](../src/nodes/load-context.ts)`→`[`intentClassification`](../src/nodes/intent-classification.ts) —
-   phân loại `intent = "booking"` qua [`IntentSchema`](../src/schemas/intent.ts) (`deterministicModel`,
-   structured output, không gọi tool), rồi `Command({ goto: bookingAgent })` — khai báo trong
-   [`graph.ts`](../src/graph.ts).
-2. **Trích slot (Model).** [`bookingAgent`](../src/nodes/booking-agent.ts) gọi
-   `largeModel.withStructuredOutput(BookingSlotsSchema)` với template
-   [`bookingSlotExtractionPrompt`](../src/prompts/booking-slot-extraction.ts) (1 `SystemMessage`
-   - toàn bộ `state.messages` làm context) — trích `type`/`destination`/`dates`/`travelers`,
-     merge với những gì còn sót lại trong state từ turn trước.
-3. **Validate schema.** Vẫn trong [`booking-agent.ts`](../src/nodes/booking-agent.ts):
-   [`BookingInputSchema.safeParse`](../src/schemas/booking.ts) check các field đã merge (rule
-   `.refine()` của nó yêu cầu `dates.end` cho hotel) — thiếu field thì dừng ngay ở đây, hỏi lại
-   user, không bao giờ đoán.
-4. **Gọi tool (deterministic, không phải model chọn) — chuỗi gọi thật, băng qua 2 process:**
-   1. [`bookingAgent`](../src/nodes/booking-agent.ts) validate xong slot → gọi `searchHotel({...})`.
-      Hàm này **import từ [`mcp/client.ts`](../src/mcp/client.ts)**
-      ([booking-agent.ts:32](../src/nodes/booking-agent.ts#L32)), không phải từ
-      `booking-actions.ts` trực tiếp.
-   2. **`mcp/client.ts`** nhận lệnh — nó chỉ là wrapper gọi `callBookingTool(TOOL_NAME.SEARCH_HOTELS, params, HotelResultSchema)`,
-      lấy MCP client instance (spawn subprocess nếu chưa có), rồi gọi
-      `client.callTool({ name: 'search_hotels', arguments: params })` — gửi request này qua
-      **stdio** sang process con.
-   3. Request tới **[`mcp/booking-server.ts`](../src/mcp/booking-server.ts)** (chạy trong
-      process con riêng), đã đăng ký sẵn tool `search_hotels` qua `server.registerTool(...)`.
-      **Ở đây booking-server.ts làm việc thật**: handler của nó gọi tiếp `searchHotel(input)` —
-      lần này là 1 hàm **khác**, import từ `booking-actions.ts` (cùng tên `searchHotel` nhưng 2
-      file khác nhau, làm 2 việc khác nhau — dễ nhầm).
-   4. **[`mcp/booking-actions.ts`](../src/mcp/booking-actions.ts)**'s `searchHotel()` mới là nơi
-      gọi `apiGet()` thật — bắn HTTP GET tới mock booking API (`API_ENDPOINT.HOTELS_AVAILABILITY`,
-      đường đi giống hệt `weatherTool` gọi API weather), validate response bằng
-      `HotelSearchResponseSchema` (Zod), map thành `HotelResult[]`.
-   5. Kết quả đi ngược lại: `booking-actions.ts` → `booking-server.ts` (bọc thành
-      `{ content: [{ type: 'text', text: JSON.stringify({status:'ok', response}) }] }`) → qua
-      stdio → `mcp/client.ts`'s `callBookingTool` nhận, parse JSON, validate lại 1 lần nữa bằng
-      Zod (`parseToolEnvelope`) → trả `HotelResult[]` về cho `bookingAgent`.
+1. Request đi qua loadContext để chuẩn bị state của turn hiện tại, sau đó
+intentClassification xác định đây là booking intent và handoff sang bookingAgent.
 
-   Kết quả trả về (`results` — danh sách khách sạn) chỉ nằm trong biến local của node, **chưa
-   gửi cho user** — nó sẽ là payload cho bước 5 ngay sau đây, trong cùng 1 lần chạy node, chưa
-   return khỏi `bookingAgent`.
+2. Tại bookingAgent, GPT-4 được dùng để extract các booking slots, chẳng hạn:
+booking type, destination, ngày đi, ngày về và số người.
 
-5. **Interrupt — dừng chờ người.** Vẫn trong cùng lần chạy đó, `promptHotelSelection(results)`
-   ([`booking-agent.ts`](../src/nodes/booking-agent.ts)) gọi
-   `interrupt({ type: 'select_hotel', options: results })` của LangGraph. `interrupt()` **không
-   return bình thường** — nó **throw** 1 exception đặc biệt (`GraphInterrupt`). LangGraph runtime
-   bắt nó ở tầng thực thi graph (ngoài code app), gửi `payload` (danh sách khách sạn) ra cho
-   client, rồi **checkpoint state hiện tại** qua [`PostgresSaver`](../src/db/checkpointer.ts) và
-   dừng graph **đúng ngay tại dòng gọi `interrupt()`**. Nhờ đã checkpoint, chỗ dừng (và toàn bộ
-   context chuyến đi) sống sót qua cả restart agent process.
-6. **Stream trực tiếp về client.** Event interrupt stream sang frontend qua cùng 1 kết nối
-   (không polling) — `useInterrupt()` trong
-   [`use-booking-selection-interrupt.tsx`](../../web/src/hooks/use-booking-selection-interrupt.tsx)
-   nhận event và render
-   [`HotelResultsList`](../../web/src/components/travel-list/HotelResultsList.tsx) như 1
-   card chọn lựa sống động.
-7. **Resume.** User chọn 1 khách sạn → card gọi `resolve({ selectedId })` → frontend gửi
-   `graph.invoke(new Command({ resume: { selectedId } }))`, resume đúng ngay chỗ `bookingAgent`
-   đang pause ở `interrupt()`, được validate bằng `SelectionResumeSchema`.
-8. **Hoàn tất card + persist.** Hotel được map thành 1 item trong itinerary,
-   `destination`/`dates`/`travelers` được xoá. `buildSelectionResultMessages()` gọi internal
-   [`bookingHotelResultTool`](../src/tools/booking-result.ts) để lifecycle card hoàn tất render
-   trước, rồi persist cặp tool-call/result. AI message dùng lại ID parent của live card còn
-   ToolMessage dùng ID riêng, nên snapshot reconcile card tại chỗ và options vẫn còn cho reload/
-   time travel.
-9. **Trả lời + memory.** Sau card, [`responder`](../src/nodes/responder.ts) mới stream câu trả lời
-   cuối ở bên dưới; sau đó [`memoryCapture`](../src/nodes/memory-capture.ts) chạy
-   tiếp (tuần tự, không song song) để tranh thủ check turn này xem có preference nào lỡ chèn vào
-   không. `responder` không thấy được kết quả của `memoryCapture` trong cùng lượt này (memoryCapture
-   luôn chạy sau, không bao giờ song song — 2 model stream chạy cùng lúc trên 1 run từng làm cắt
-   cụt stream của responder, xem §3).
-10. **Bonus — time travel.** Đổi ý về đúng booking này sau đó chính là §4 dưới đây.
+3. Dữ liệu được kiểm tra bằng booking schema.
+
+Nếu còn thiếu field, hệ thống dừng trước khi search và hỏi user bổ sung đúng
+thông tin còn thiếu.
+
+4. Khi đã đủ field, bookingAgent gọi trực tiếp searchHotels.
+Tool này không được bind để model tự chọn mà được code điều khiển.
+
+Request đi qua MCP client. MCP client giao tiếp với MCP server qua stdio.
+MCP server thực thi booking action tương ứng để gọi mock booking API.
+
+Kết quả được validate rồi trả từ MCP server về MCP client và cuối cùng quay
+lại bookingAgent.
+
+5. Sau khi nhận danh sách khách sạn, bookingAgent gọi interrupt() để tạm dừng
+graph và chờ user lựa chọn.
+
+6. Ở frontend, useInterrupt nhận interrupt payload và render danh sách hotel
+cards.
+
+7. Khi user chọn một khách sạn, frontend gửi selectedId để resume interrupt.
+BookingAgent kiểm tra lựa chọn và tìm đúng hotel trong danh sách kết quả ban đầu.
+
+8. BookingAgent hoàn thành card, persist tool-call/result messages và cập nhật
+hotel đã chọn vào itinerary.
+
+9. Cuối cùng, responder stream câu trả lời cho user. Sau khi responder hoàn tất,
+memoryCapture kiểm tra message mới nhất và chỉ lưu nếu user có đề cập đến thông
+tin cá nhân hoặc sở thích.
 
 ## 2. RAG
 
