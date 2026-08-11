@@ -41,28 +41,32 @@ sang 1 trong 6 node domain. Gộp thành 1 agent bind hết tool sẽ gặp:
 Phân biệt theo việc node có cần **model ra quyết định** hay không, và nếu có thì model đó bind
 tool gì.
 
-| Node                       | Model                                      | Kiểu                                                                                       | Mô tả                                                                                                                                                                                                                                                                                                       |
-| -------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `load-context.ts`          | — (không gọi model)                        | Function thuần                                                                             | Pass `itinerary` qua nguyên trạng mỗi turn để đồng bộ state cho frontend — chỉ plumbing, không merge/validate gì                                                                                                                                                                                            |
-| `intent-classification.ts` | `deterministicModel` (gpt-4o-mini, temp 0) | Structured output, không `bindTools`                                                       | Phân loại message vào 1 trong 7 intent (`weather`/`places`/`booking`/`cancel`/`policy`/`memory`/`unknown`) qua `IntentSchema`, rồi `Command({ goto })`                                                                                                                                                      |
-| `weather-agent.ts`         | `smallModel` (gpt-4o-mini)                 | Agent node — bind `weatherTool`                                                            | Model tự quyết định có gọi tool weather không; tool gọi weather API                                                                                                                                                                                                                                         |
-| `places-agent.ts`          | `smallModel` (gpt-4o-mini)                 | Agent node — bind `placesTool`                                                             | Model tự quyết định có gọi tool places không; tool gọi places API                                                                                                                                                                                                                                           |
-| `policy-agent.ts`          | `deterministicModel` (gpt-4o-mini, temp 0) | Agent node — bind `policyTool`                                                             | Tool làm RAG bên trong: `textEmbeddingModel` (`text-embedding-3-small`) embed câu hỏi, pgvector cosine search trên `policy_chunks` (ngưỡng 0.5) trả chunk khớp nhất                                                                                                                                         |
-| `booking-agent.ts`         | `largeModel` (gpt-4o) — chỉ để trích slot  | **Không** `bindTools` — deterministic control flow                                         | Model chỉ trích slot (`withStructuredOutput(BookingSlotsSchema)`); có đủ field thì code gọi thẳng `searchFlight`/`searchHotel` (MCP) rồi `interrupt()` chờ user chọn. `intent === 'cancel'` không gọi model — trả message cố định (huỷ thật xảy ra ở client, qua nút Cancel trên itinerary, không qua chat) |
-| `memory-agent.ts`          | `smallModel` (gpt-4o-mini)                 | Agent node — bind 3 tool (`saveMemoryTool`, `recallMemoryTool`, `saveUserProfileTool`)     | Xử lý yêu cầu lưu/hỏi lại preference tường minh. Không `interrupt()`                                                                                                                                                                                                                                        |
-| `memory-capture.ts`        | `deterministicModel` (gpt-4o-mini, temp 0) | Gọi model để trích xuất, nhưng **không** `bindTools` — tự gọi thẳng tool nếu trích được gì | Chạy sau weather/places/booking, trước `responder`; chỉ quét `HumanMessage` mới nhất để tìm preference/profile fact lỡ chèn vào                                                                                                                                                                             |
-| `responder.ts`             | `smallModel` (gpt-4o-mini)                 | Gọi model với toàn bộ `state.messages`, không `bindTools`                                  | Viết câu trả lời cuối; không lặp lại data card đã render                                                                                                                                                                                                                                                    |
+| Node                       | Model                                      | Kiểu                                                                                       | Mô tả                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `load-context.ts`          | — (không gọi model)                        | Function thuần                                                                             | Pass `itinerary` qua nguyên trạng mỗi turn để đồng bộ state cho frontend — chỉ plumbing, không merge/validate gì                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `intent-classification.ts` | `deterministicModel` (gpt-4o-mini, temp 0) | Structured output, không `bindTools`                                                       | Phân loại message vào 1 trong 7 intent (`weather`/`places`/`booking`/`cancel`/`policy`/`memory`/`unknown`) qua `IntentSchema`, rồi `Command({ goto })`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `weather-agent.ts`         | `smallModel` (gpt-4o-mini)                 | Structured destination extraction; code gọi thẳng `weatherTool`                            | Chỉ đọc `HumanMessage` mới nhất, fallback `state.destination`; thiếu destination thì dừng trước API và hỏi lại. Đủ destination thì gọi tool để UI render card, lấy ID lifecycle card làm ID của tool-call persist để snapshot reconcile tại chỗ, rồi lưu destination vào state                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `supervisor.ts`            | `deterministicModel` (gpt-4o-mini, temp 0) | Structured output, không `bindTools`                                                       | Chạy sau `weatherAgent` HOẶC `placesAgent`, đọc `HumanMessage` mới nhất + `state.stepsCompleted` + `state.toolResult`. Ngoại lệ duy nhất là `pendingRequest`: request weather/places đang chờ destination được giữ đúng qua lượt hỏi lại, nên câu trả lời "Paris" vẫn resume phần "nếu đẹp thì đặt vé". Không truyền full history, tránh suggestion/request cũ bị hiểu là yêu cầu hiện tại. Qua `SupervisorDecisionSchema`, node quyết định domain weather/places/booking tiếp theo; `Command({ goto, update })` handoff ngay trong lượt. Lookup thành công thì clear `pendingRequest`. Code enforce loop-guard và `bookingAgent` không quay lại supervisor, nên chain tối đa 3 hop |
+| `places-agent.ts`          | `smallModel` (gpt-4o-mini)                 | Structured destination extraction; code gọi thẳng `placesTool`                             | Cùng flow validate và lifecycle-ID handoff như weather: chỉ đọc message user mới nhất, fallback state, thiếu thì hỏi trước; đủ thì code gọi places API, giữ card trước responder sau snapshot và lưu destination vào state                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `policy-agent.ts`          | `deterministicModel` (gpt-4o-mini, temp 0) | Agent node — bind `policyTool`                                                             | Câu hỏi cụ thể dùng mode `search`: embed + pgvector cosine search. Câu hỏi chung dùng `list_topics`: đọc `topic/title` trực tiếp từ các chunk đã ingest để hỏi user muốn xem mục nào, không hardcode category                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `booking-agent.ts`         | `largeModel` trích slot + `smallModel` khi thiếu field | **Không** `bindTools` — deterministic control flow                              | Có đủ field thì code gọi thẳng MCP rồi `interrupt()`. Resume xong, node gọi internal booking-result tool để lifecycle card hoàn tất xuất hiện trước responder, rồi persist cặp tool-call/result cùng ID handoff cho reload/time travel. Nếu thiếu field, node tạo đúng 1 clarification `AIMessage`, set `responseHandled`; `responder` không duplicate. `intent === 'cancel'` không gọi model; huỷ thật ở client qua itinerary                                                                                                                                                                                                                                                                                  |
+| `memory-agent.ts`          | `smallModel` (gpt-4o-mini)                 | Agent node — bind 3 tool (`saveMemoryTool`, `recallMemoryTool`, `saveUserProfileTool`)     | Xử lý yêu cầu lưu/hỏi lại preference tường minh. Không `interrupt()`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `memory-capture.ts`        | `deterministicModel` (gpt-4o-mini, temp 0) | Gọi model để trích xuất, nhưng **không** `bindTools` — tự gọi thẳng tool nếu trích được gì | Chỉ quét `HumanMessage` mới nhất để tìm preference/profile fact lỡ chèn vào; chạy **sau khi `responder` hoàn tất** cho intent weather/places/booking/cancel, không chạy trước hoặc song song                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `responder.ts`             | `smallModel` (gpt-4o-mini)                 | Gọi model với toàn bộ `state.messages`, không `bindTools`                                  | Viết câu trả lời cuối cho flow thường. Nếu booking đã append missing-field clarification thì chỉ clear `responseHandled`, không gọi model lần hai                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
-**Tool ↔ node** (6 LangChain `tool()` bind qua `bindTools` + 2 tool MCP gọi trực tiếp, không qua model):
+**Tool ↔ node** (8 LangChain `tool()`; policy/memory dùng `bindTools`, weather/places,
+memoryCapture và booking-result lifecycle gọi trực tiếp; cộng thêm 2 tool MCP):
 
 | Tool                | Bind ở node                       | Gọi model hay gọi thẳng                                     |
 | ------------------- | --------------------------------- | ----------------------------------------------------------- |
-| `weather`           | `weatherAgent`                    | model chọn qua `bindTools`                                  |
-| `places`            | `placesAgent`                     | model chọn qua `bindTools`                                  |
+| `weather`           | `weatherAgent`                    | code gọi thẳng sau structured destination extraction       |
+| `places`            | `placesAgent`                     | code gọi thẳng sau structured destination extraction       |
 | `policy`            | `policyAgent`                     | model chọn qua `bindTools` (RAG bên trong)                  |
 | `save_memory`       | `memoryAgent`, `memoryCapture`    | `memoryAgent`: model chọn; `memoryCapture`: gọi thẳng       |
 | `save_user_profile` | `memoryAgent`, `memoryCapture`    | như trên                                                    |
 | `recall_memory`     | `memoryAgent`                     | model chọn qua `bindTools`                                  |
+| `booking_flight_result` | `bookingAgent`                | internal lifecycle tool gọi thẳng sau resume để render/persist confirmed card |
+| `booking_hotel_result`  | `bookingAgent`                | như trên                                                    |
 | `search_flights`    | `bookingAgent` (MCP server riêng) | gọi thẳng qua MCP client — **không** qua model tool-calling |
 | `search_hotels`     | `bookingAgent` (MCP server riêng) | như trên                                                    |
 
@@ -73,16 +77,59 @@ tool gì.
 
 ## 3. Flow của graph
 
+State dùng `StateSchema` kết hợp `CopilotKitStateSchema` trong
+[`src/states/trip.ts`](../src/states/trip.ts), gồm messages/UI state và `destination`, `dates`,
+`travelers`, `intent`, `itinerary`, `toolResult`, `pendingRequest`, `responseHandled`,
+`stepsCompleted`.
+`pendingRequest` chỉ tồn tại khi weather/places đang chờ destination và được clear ngay khi lookup
+đã chạy, không phải bản sao toàn bộ conversation history.
+
 - đầu tiền là sẽ load context
 - sau đó agent sẽ dựa theo message user hỏi để pick agent tương ứng
 - với agent booking thì sẽ sử dụng mcp local
   và có HITL để user có thể interract
 - còn với agent weather/ place thì sẽ gọi thẳng api
-- 3 agent này sẽ thông qua một lớp memory capture để check xem user có để cập đến sở thích hay tt cá nhân ko để lưu vào long memory
-- còn **policy agent** embed câu hỏi của user → tìm chunk đã lưu sẵn → dùng chunk đó để trả lời có trích dẫn
-- **memory agent** thì save/ get long memory của user
+- riêng `weatherAgent` VÀ `placesAgent` xong không đi thẳng qua responder ngay — cả 2 đều ghé
+  qua **`supervisor`** (`nodes/supervisor.ts`) trước: đọc lại tin nhắn gốc của user +
+  `state.stepsCompleted` (domain nào đã chạy trong lượt này) + kết quả vừa có, nếu user còn xin
+  domain nào khác trong 3 domain weather/places/booking (outright hoặc kiểu điều kiện "nếu đẹp
+  thì đặt vé giúp tôi") mà domain đó chưa chạy và điều kiện (nếu có) đã thoả thì
+  `Command({ goto })` sang domain đó luôn trong cùng lượt (không hỏi lại xác nhận trung gian) —
+  còn không thì đi tiếp responder như bình thường. Nhờ vậy câu gộp cả 3 ("thời tiết đẹp không,
+  có chỗ nào chơi không, nếu ổn thì đặt khách sạn luôn") chạy hết cả 3 domain trong 1 lượt, mỗi
+  hop qua `supervisor` lại đánh dấu domain vừa xong vào `stepsCompleted` rồi đánh giá tiếp.
+  `bookingAgent` là node cuối (terminal) — không route ngược lại `supervisor` — nên chain chỉ
+  tối đa 3 hop, và đây là code enforce (không chỉ dựa vào prompt): `supervisor` chỉ tin
+  `nextStep` model trả về nếu domain đó thật sự còn nằm trong danh sách chưa chạy. Chưa áp cho
+  `policyAgent`/`memoryAgent` (không phải "bước tiếp theo" tự nhiên sau 1 lookup, đã xác nhận
+  với user)
+- weather/ places (qua `supervisor` để chain — xem trên)/ booking đi qua
+  **responder** trước. Bình thường responder stream câu trả lời; riêng booking thiếu field thì
+  `bookingAgent` đã append clarification đúng sau card/transition và set `responseHandled`, nên
+  responder chỉ clear cờ, không viết duplicate. Sau đó responder mới
+  conditional-route tiếp qua memoryCapture (dựa vào `state.intent`) để
+  check xem user có đề cập đến sở thích hay tt cá nhân ko để lưu vào long memory — memoryCapture
+  luôn chạy SAU responder, không bao giờ song song với nó: từng thử cho 2 node chạy song song
+  (parallel fan-out) để giảm delay, nhưng 2 lần gọi model stream cùng lúc trên 1 run làm rối cái
+  "message đang stream dở" mà CopilotKit AGUI adapter theo dõi (dùng chung 1 biến cho cả run,
+  không tách theo node) → cắt cụt stream của responder giữa chừng. Nên phải quay lại tuần tự,
+  chỉ đổi chiều: responder trước (visible reply không bị delay), memoryCapture sau theo thứ tự
+  trong cùng graph run; run vẫn chờ memoryCapture hoàn tất rồi mới tới `END`. Đổi lại responder
+  không thấy được kết quả memoryCapture lưu gì trong cùng lượt đó nữa
+- còn **policy agent** chọn 1 trong 2 mode: câu hỏi cụ thể thì embed → tìm chunk đã lưu sẵn →
+  responder trả lời có trích dẫn; câu hỏi policy chung chung thì đọc danh sách `topic/title` từ
+  DB để responder hỏi user muốn xem mục nào (không hardcode danh mục)
+- **memory agent** thì save/ get long memory của user (nối tiếp trước responder — nên vẫn xác
+  nhận được ngay trong lượt đó)
 - rồi tất cả sẽ về phần response để agent trả lời user
 - tiếp đến trl xong sẽ lưu lại ở **checkpoint** - doan nay thật ra được ghi sau mỗi bước của graph
+
+Các model call nội bộ dùng `INTERNAL_MODEL_CONFIG` (`constants/models.ts`) với tag chuẩn
+`nostream` của LangGraph để loại chunk khỏi `messages` stream. CopilotKit còn subscribe raw
+`events`, nên config này đồng thời đặt metadata `emit-messages`/`emit-tool-calls = false` cho
+adapter AG-UI. Vì vậy structured output vẫn chạy và trace được nhưng không đường stream nào làm
+lộ JSON trung gian. `responder` không gắn suppression nên stream text; lifecycle tool render card
+hoàn tất trước, rồi responder stream ở dưới card.
 
 ## 4. Memory: short-term vs long-term
 
@@ -132,8 +179,9 @@ short-term = "cuộc chat này đang tới đâu", long-term = "user này là ai
 
 ## 9. RAG — pgvector vs keyword, node hay tool
 
-- **Hiện tại**: thuần pgvector (cosine distance, ngưỡng `POLICY_MATCH_MAX_DISTANCE = 0.5`).
-  Không có full-text/keyword search.
+- **Hiện tại**: câu hỏi policy cụ thể dùng pgvector cosine distance (ngưỡng
+  `POLICY_MATCH_MAX_DISTANCE = 0.5`), không có full-text/keyword search. Câu hỏi policy chung
+  dùng `retrievePolicyTopics()` đọc `topic/title` của chunk trong DB để tạo lựa chọn động.
 - **Hybrid được không?** Được (vector + full-text + rerank), nhưng chưa cần vì corpus nhỏ.
   Đánh giá "nhỏ hay lớn" dựa vào:
   - **Số chunk**: vài chục–vài trăm = nhỏ; chục nghìn–triệu = lớn.
@@ -279,6 +327,7 @@ flowchart TD
     N2["2. booking-agent.ts<br/>largeModel.withStructuredOutput<br/>(prompts/booking-slot-extraction.ts)"]
     N3{"3. BookingInputSchema.safeParse<br/>(schemas/booking.ts)"}
     N3a["thiếu field → hỏi lại user<br/>(booking-agent.ts)"]
+    RG["responder.ts<br/>clear responseHandled; không gọi model duplicate"]
     N4["4. booking-agent.ts<br/>code gọi thẳng searchHotel (không bindTools)"]
     N4a["mcp/client.ts<br/>MCP client — process agent"]
     N4b["mcp/booking-server.ts<br/>MCP server — process con riêng"]
@@ -286,8 +335,10 @@ flowchart TD
     N5["5. booking-agent.ts<br/>promptHotelSelection → interrupt()"]
     CKPT[("db/checkpointer.ts<br/>PostgresSaver — checkpoint")]
     N7["7. resume tại interrupt()<br/>SelectionResumeSchema"]
-    N8["8. memory-capture.ts"]
-    N9["responder.ts — câu trả lời cuối"]
+    N7b["8. booking-result.ts<br/>emit card hoàn tất + persist tool pair"]
+    N8["10. memory-capture.ts"]
+    N9["9. responder.ts — stream dưới card"]
+    D(["Itinerary/state cập nhật + lượt hoàn tất"])
   end
 
   subgraph WEB["apps/web (CopilotKit)"]
@@ -298,15 +349,14 @@ flowchart TD
   end
 
   U --> N1 --> N2 --> N3
-  N3 -- thiếu field --> N3a
+  N3 -- thiếu field --> N3a --> RG --> N8 --> D
   N3 -- đủ field --> N4 --> N4a
   N4a -. spawn subprocess + stdio .-> N4b --> N4c
   N4c -. kết quả qua stdio .-> N4a --> N5
   N5 --> CKPT
   N5 -. SSE stream .-> N6 --> N6b --> P
-  P -. resolve selectedId .-> N7 --> N8 --> N9
-  N9 --> D(["Itinerary cập nhật + trả lời cuối"])
-  N9 -. đổi ý sau .-> FORK["9. api/booking-fork/route.ts<br/>time travel — fork checkpoint (§11)"]
+  P -. resolve selectedId .-> N7 --> N7b --> N9 --> N8 --> D
+  D -. đổi ý sau .-> FORK["api/booking-fork/route.ts<br/>time travel — fork checkpoint (§11)"]
 ```
 
 **Từng bước** — user gõ "Book a hotel in Da Nang, Aug 1–5, 2 travelers":
@@ -377,11 +427,20 @@ flowchart TD
 7. **Resume.** User chọn 1 khách sạn → card gọi `resolve({ selectedId })` → frontend gửi
    `graph.invoke(new Command({ resume: { selectedId } }))`, resume đúng ngay chỗ `bookingAgent`
    đang pause ở `interrupt()`, được validate bằng `SelectionResumeSchema`.
-8. **Hoàn tất.** Hotel được map thành 1 item trong itinerary, `destination`/`dates`/`travelers`
-   được xoá (để booking tiếp theo không liên quan không bị thừa kế nhầm — xem §5), rồi
-   [`memoryCapture`](../src/nodes/memory-capture.ts) tranh thủ check turn này xem có preference
-   nào lỡ chèn vào không, và [`responder`](../src/nodes/responder.ts) viết câu trả lời cuối.
-9. **Bonus — time travel.** Đổi ý về đúng booking này sau đó chính là flow ở §11: fork lại
+8. **Hoàn tất card + persist.** Hotel được map thành 1 item trong itinerary,
+   `destination`/`dates`/`travelers` được xoá (để booking tiếp theo không liên quan không bị
+   thừa kế nhầm — xem §5). `buildSelectionResultMessages()` gọi internal
+   [`bookingHotelResultTool`](../src/tools/booking-result.ts) để lifecycle card hoàn tất render
+   trước, rồi persist cặp `AIMessage` tool-call + `ToolMessage`. AI message dùng lại ID parent
+   của live card, còn ToolMessage có ID riêng, nên snapshot AG-UI reconcile tại chỗ thay vì đẩy
+   card xuống sau text; cặp message persist cũng giữ options cho reload và time travel.
+9. **Trả lời + memory.** Sau card, [`responder`](../src/nodes/responder.ts) mới stream câu trả lời
+   cuối ở bên dưới; tiếp đó [`memoryCapture`](../src/nodes/memory-capture.ts) chạy
+   tiếp (tuần tự, không song song) để tranh thủ check turn này xem có preference nào lỡ chèn vào
+   không. `responder` không thấy được kết quả của `memoryCapture` trong cùng lượt này (memoryCapture
+   luôn chạy sau, không bao giờ song song — 2 model stream chạy cùng lúc trên 1 run từng làm cắt
+   cụt stream của responder, xem §3).
+10. **Bonus — time travel.** Đổi ý về đúng booking này sau đó chính là flow ở §11: fork lại
    checkpoint từ bước 5/7 qua `getStateHistory`/`updateState` thay vì chạy lại search từ đầu.
 
 **Gap nói thẳng** (không giấu): repo này **không có middleware layer** — không có pattern
@@ -420,7 +479,7 @@ không gói gọn trong 1 flow ví dụ, và liệt kê đủ file cho từng ta
   - [`nodes/booking-agent.ts`](../src/nodes/booking-agent.ts) — ngược lại: **code** (không phải
     model) quyết định gọi `searchHotel`/`searchFlight`, cố tình không `bindTools` (§2).
   - [`tools/index.ts`](../src/tools/index.ts) — barrel tool: `weather.ts`, `place.ts`,
-    `policy.ts`, `memory.ts`.
+    `policy.ts`, `memory.ts`, và internal lifecycle tool `booking-result.ts`.
 
 - **"Design predictable responses using message templates and schema validation."**
   - [`prompts/`](../src/prompts) — message template (`booking-slot-extraction.ts`,
@@ -440,9 +499,11 @@ không gói gọn trong 1 flow ví dụ, và liệt kê đủ file cho từng ta
 
 - **"Improve user experience through real-time event streaming."**
   - [`langgraph.json`](../langgraph.json) — agent server tự expose SSE stream chuẩn LangGraph.
-  - [`nodes/responder.ts`](../src/nodes/responder.ts) — câu trả lời cuối stream token-by-token
-    (khác structured-output node như `intentClassification`, không stream được — §"sao app lúc
-    stream lúc không" đã giải thích trong hội thoại).
+  - [`nodes/responder.ts`](../src/nodes/responder.ts) — câu trả lời cuối stream token-by-token.
+    Các model call nội bộ dùng `INTERNAL_MODEL_CONFIG` với tag `nostream` chuẩn LangGraph và cờ
+    emission dành cho raw `events` của AG-UI trong
+    [`constants/models.ts`](../src/constants/models.ts), nên JSON routing/extraction không lọt qua
+    cả hai stream path; lifecycle tool render card trước rồi responder không suppression sẽ stream dưới.
   - [`use-booking-selection-interrupt.tsx`](../../web/src/hooks/use-booking-selection-interrupt.tsx) —
     `useInterrupt()` nhận event ngay khi stream về, render card chọn lựa sống động, không polling.
 
@@ -492,6 +553,7 @@ flowchart TD
     N2["2. booking-agent.ts<br/>largeModel.withStructuredOutput<br/>(prompts/booking-slot-extraction.ts)"]
     N3{"3. BookingInputSchema.safeParse<br/>(schemas/booking.ts)"}
     N3a["thiếu field → hỏi lại user<br/>(booking-agent.ts)"]
+    RG["responder.ts<br/>clear responseHandled; không gọi model duplicate"]
     N4["4. booking-agent.ts<br/>code gọi thẳng searchHotel (không bindTools)"]
     N4a["mcp/client.ts<br/>MCP client — process agent"]
     N4b["mcp/booking-server.ts<br/>MCP server — process con riêng"]
@@ -499,8 +561,10 @@ flowchart TD
     N5["5. booking-agent.ts<br/>promptHotelSelection → interrupt()"]
     CKPT[("db/checkpointer.ts<br/>PostgresSaver — checkpoint")]
     N7["7. resume tại interrupt()<br/>SelectionResumeSchema"]
-    N8["8. memory-capture.ts"]
-    N9["responder.ts — câu trả lời cuối"]
+    N7b["8. booking-result.ts<br/>emit card hoàn tất + persist tool pair"]
+    N8["10. memory-capture.ts"]
+    N9["9. responder.ts — stream dưới card"]
+    D(["Itinerary/state cập nhật + lượt hoàn tất"])
   end
 
   subgraph WEB["apps/web (CopilotKit)"]
@@ -511,15 +575,14 @@ flowchart TD
   end
 
   U --> N1 --> N2 --> N3
-  N3 -- thiếu field --> N3a
+  N3 -- thiếu field --> N3a --> RG --> N8 --> D
   N3 -- đủ field --> N4 --> N4a
   N4a -. spawn subprocess + stdio .-> N4b --> N4c
   N4c -. kết quả qua stdio .-> N4a --> N5
   N5 --> CKPT
   N5 -. SSE stream .-> N6 --> N6b --> P
-  P -. resolve selectedId .-> N7 --> N8 --> N9
-  N9 --> D(["Itinerary cập nhật + trả lời cuối"])
-  N9 -. đổi ý sau .-> FORK["9. api/booking-fork/route.ts<br/>time travel — fork checkpoint (§4 dưới)"]
+  P -. resolve selectedId .-> N7 --> N7b --> N9 --> N8 --> D
+  D -. đổi ý sau .-> FORK["api/booking-fork/route.ts<br/>time travel — fork checkpoint (§4 dưới)"]
 ```
 
 **Từng bước** — user gõ "Book a hotel in Da Nang, Aug 1–5, 2 travelers":
@@ -563,6 +626,7 @@ flowchart TD
    Kết quả trả về (`results` — danh sách khách sạn) chỉ nằm trong biến local của node, **chưa
    gửi cho user** — nó sẽ là payload cho bước 5 ngay sau đây, trong cùng 1 lần chạy node, chưa
    return khỏi `bookingAgent`.
+
 5. **Interrupt — dừng chờ người.** Vẫn trong cùng lần chạy đó, `promptHotelSelection(results)`
    ([`booking-agent.ts`](../src/nodes/booking-agent.ts)) gọi
    `interrupt({ type: 'select_hotel', options: results })` của LangGraph. `interrupt()` **không
@@ -580,17 +644,24 @@ flowchart TD
 7. **Resume.** User chọn 1 khách sạn → card gọi `resolve({ selectedId })` → frontend gửi
    `graph.invoke(new Command({ resume: { selectedId } }))`, resume đúng ngay chỗ `bookingAgent`
    đang pause ở `interrupt()`, được validate bằng `SelectionResumeSchema`.
-8. **Hoàn tất.** Hotel được map thành 1 item trong itinerary, `destination`/`dates`/`travelers`
-   được xoá (để booking tiếp theo không liên quan không bị thừa kế nhầm), rồi
-   [`memoryCapture`](../src/nodes/memory-capture.ts) tranh thủ check turn này xem có preference
-   nào lỡ chèn vào không, và [`responder`](../src/nodes/responder.ts) viết câu trả lời cuối.
-9. **Bonus — time travel.** Đổi ý về đúng booking này sau đó chính là §4 dưới đây.
+8. **Hoàn tất card + persist.** Hotel được map thành 1 item trong itinerary,
+   `destination`/`dates`/`travelers` được xoá. `buildSelectionResultMessages()` gọi internal
+   [`bookingHotelResultTool`](../src/tools/booking-result.ts) để lifecycle card hoàn tất render
+   trước, rồi persist cặp tool-call/result. AI message dùng lại ID parent của live card còn
+   ToolMessage dùng ID riêng, nên snapshot reconcile card tại chỗ và options vẫn còn cho reload/
+   time travel.
+9. **Trả lời + memory.** Sau card, [`responder`](../src/nodes/responder.ts) mới stream câu trả lời
+   cuối ở bên dưới; sau đó [`memoryCapture`](../src/nodes/memory-capture.ts) chạy
+   tiếp (tuần tự, không song song) để tranh thủ check turn này xem có preference nào lỡ chèn vào
+   không. `responder` không thấy được kết quả của `memoryCapture` trong cùng lượt này (memoryCapture
+   luôn chạy sau, không bao giờ song song — 2 model stream chạy cùng lúc trên 1 run từng làm cắt
+   cụt stream của responder, xem §3).
+10. **Bonus — time travel.** Đổi ý về đúng booking này sau đó chính là §4 dưới đây.
 
 ## 2. RAG
 
-Trả lời câu hỏi booking policy bằng cách embed câu hỏi rồi tìm chunk gần nhất qua pgvector cosine
-search. 2 flow tách biệt, chạy ở 2 thời điểm khác nhau: **ingestion** (offline, chạy 1 lần qua
-CLI) và **retrieval** (runtime, mỗi câu hỏi của user).
+Booking policy có 1 flow **ingestion** offline và 2 mode runtime: câu hỏi cụ thể dùng pgvector
+retrieval; câu hỏi chung chung lấy danh sách topic trực tiếp từ các chunk đã ingest để hỏi lại user.
 
 **Sơ đồ:**
 
@@ -600,7 +671,7 @@ flowchart TD
     direction TB
     C["rag/corpus/booking-policy.md<br/>5 section, 1 section/heading ##"]
     SPLIT["rag/split-markdown.ts<br/>splitMarkdownSections()"]
-    VAL["schemas/policy.ts<br/>PolicyChunkSchema.safeParse()<br/>chunk lỗi → skip, không fatal"]
+    VAL["schemas/policy-chunk.ts<br/>PolicyChunkSchema.safeParse()<br/>chunk lỗi → skip, không fatal"]
     EMB1["models/index.ts<br/>textEmbeddingModel.embedQuery()<br/>(text-embedding-3-small)"]
     INS["rag/ingest.ts<br/>insertPolicyChunk()<br/>INSERT INTO policy_chunks"]
     DB1[("Postgres — policy_chunks<br/>(cột pgvector)")]
@@ -612,15 +683,20 @@ flowchart TD
     IC["intent-classification.ts<br/>intent = policy"]
     PA["policy-agent.ts<br/>deterministicModel.bindTools([policyTool])"]
     PT["tools/policy.ts<br/>policyTool"]
-    RP["rag/retrieve-policy.ts<br/>retrievePolicyChunks(question)"]
+    MODE{"policyTool mode"}
+    RP["search<br/>retrievePolicyChunks(question)"]
+    RC["rag/retrieve.ts<br/>retrieveChunks() + searchByEmbedding()<br/>dùng chung — table/columns/threshold lấy từ config"]
     EMB2["textEmbeddingModel.embedQuery(question)"]
     Q["pgvector cosine search<br/>embedding &lt;=&gt; $1 &lt;= 0.5<br/>ORDER BY distance LIMIT 3"]
-    RESP["responder.ts<br/>viết câu trả lời kèm trích dẫn"]
+    TOPICS["list_topics<br/>retrievePolicyTopics()<br/>SELECT topic,title ORDER BY title"]
+    RESP["responder.ts<br/>trả lời có citation hoặc hỏi chọn topic"]
   end
 
   C --> SPLIT --> VAL --> EMB1 --> INS --> DB1
 
-  U --> IC --> PA --> PT --> RP --> EMB2 --> Q
+  U --> IC --> PA --> PT --> MODE
+  MODE -- specific --> RP --> RC --> EMB2 --> Q
+  MODE -- broad --> TOPICS --> RESP
   DB1 -. được query bởi .-> Q
   Q --> RESP
 ```
@@ -640,7 +716,7 @@ flowchart TD
 4. **Embed.** `content` của mỗi chunk hợp lệ qua `textEmbeddingModel.embedQuery()`
    ([`models/index.ts`](../src/models/index.ts), `text-embedding-3-small`) ra vector 1536 chiều.
 5. **Insert.** `insertPolicyChunk()` chạy raw SQL `INSERT INTO policy_chunks (topic, title,
-   content, embedding) VALUES (...)` — dùng chung `pool` connection với checkpointer
+content, embedding) VALUES (...)` — dùng chung `pool` connection với checkpointer
    ([`db/checkpointer.ts`](../src/db/checkpointer.ts)), chỉ khác bảng.
 6. 1 chunk embed/insert lỗi không chặn cả batch — CLI in tổng kết inserted vs. skipped ở cuối.
 
@@ -654,27 +730,36 @@ flowchart TD
    [`POLICY_AGENT_PROMPT`](../src/prompts/policy-agent.ts) — khác `bookingAgent`, chỗ này **có**
    dùng `bindTools`: model tự quyết định gọi tool `policy` (prompt yêu cầu luôn tra cứu thay vì
    đoán, nhưng việc gọi tool vẫn do model chủ động, không phải code ép buộc).
-3. **Tool chạy.** [`tools/policy.ts`](../src/tools/policy.ts)'s `policyTool` gọi
-   `retrievePolicyChunks(question)`.
-4. **Embed câu hỏi.** [`rag/retrieve-policy.ts`](../src/rag/retrieve-policy.ts) embed `question`
-   bằng đúng `textEmbeddingModel.embedQuery()` dùng lúc ingestion — câu hỏi và corpus phải nằm
-   chung 1 embedding space.
-5. **pgvector search.** 1 câu SQL sắp `policy_chunks` theo cosine distance (`embedding <=> $1`,
-   toán tử pgvector) tới embedding câu hỏi, chỉ giữ row trong ngưỡng
-   `POLICY_MATCH_MAX_DISTANCE = 0.5`, giới hạn 3 chunk gần nhất.
-6. **Kết quả đi ngược lại.** `policyTool` trả `{ status: 'ok', response: { chunks } }` →
-   `policyAgent` lưu vào `state.toolResult` → [`responder`](../src/nodes/responder.ts) đọc
-   `toolResult`/`messages` viết câu trả lời cuối, trích dẫn chunk khớp. Không có card generative-UI
-   nào render cái này (khác weather/places/booking) — cố tình đọc như câu trả lời có trích dẫn
-   bình thường, không phải data card.
+3. **Tool chọn mode.** [`tools/policy.ts`](../src/tools/policy.ts)'s `policyTool` nhận
+   `mode: "search" | "list_topics"`. Câu hỏi cụ thể gọi `retrievePolicyChunks(question)`;
+   yêu cầu chung như "booking policy" gọi `retrievePolicyTopics()` để lấy title từ DB.
+4. **Embed câu hỏi.** `retrievePolicyChunks` trong
+   [`rag/retrieve-policy.ts`](../src/rag/retrieve-policy.ts) gọi tới
+   [`rag/retrieve.ts`](../src/rag/retrieve.ts)'s `retrieveChunks()` (dùng chung) — hàm này embed
+   `question` bằng đúng `textEmbeddingModel.embedQuery()` dùng lúc ingestion — câu hỏi và corpus
+   phải nằm chung 1 embedding space.
+5. **pgvector search.** `searchByEmbedding()` trong `rag/retrieve.ts` chạy 1 câu SQL — table, các
+   column select, và ngưỡng khoảng cách đều lấy từ config mà `retrieve-policy.ts` truyền vào
+   (`policy_chunks` / `topic, title, content` / `POLICY_MATCH_MAX_DISTANCE = 0.5`), không hard-code
+   trong helper dùng chung — sắp theo cosine distance (`embedding <=> $1`, toán tử pgvector) tới
+   embedding câu hỏi, chỉ giữ row trong ngưỡng, giới hạn 3 chunk gần nhất. Việc tách này (module
+   `rag/retrieve.ts` dùng chung + config riêng của policy trong `retrieve-policy.ts`) là điểm giúp
+   1 corpus khác sau này (vd places) tái sử dụng đúng pipeline embed/search này mà không phải viết
+   lại SQL.
+6. **Kết quả đi ngược lại.** Nhánh search trả
+   `{ status: 'ok', response: { kind: 'answer', chunks } }`; nhánh catalog trả
+   `{ status: 'ok', response: { kind: 'topics', topics } }`. `policyAgent` lưu kết quả vào
+   `state.toolResult`; [`responder`](../src/nodes/responder.ts) hoặc viết câu trả lời có citation,
+   hoặc hỏi user chọn một title đúng như DB trả về và dùng cùng ngôn ngữ với câu hỏi. Không có
+   card generative-UI cho policy.
 
 **Node vs. tool**: `policyTool` là tool gọi từ `policyAgent` (agent node) — RAG ở đây là lookup 1
 bước, không cần pause/resume nhiều bước như `bookingAgent`, nhưng model vẫn cần quyết định có gọi
 hay không → đúng kiểu tool trong agent node.
 
-**Phạm vi hiện tại**: thuần pgvector (cosine distance), không có keyword/full-text search — corpus
-chỉ 5 section ngắn, quá nhỏ để vector-only bị nhầm đáng kể. Hybrid (vector + full-text + rerank)
-chưa cần ở quy mô này.
+**Phạm vi hiện tại**: nhánh trả lời cụ thể dùng thuần pgvector, không có keyword/full-text search;
+nhánh câu hỏi chung dùng SQL metadata (`topic/title`), không dùng embedding. Hybrid
+(vector + full-text + rerank) chưa được triển khai.
 
 ## 3. Threads
 
@@ -730,7 +815,7 @@ của thread) mới phản ánh nhánh vừa fork.
 flowchart TD
   subgraph EARLIER["Trước đó — booking được confirm (flow booking bình thường)"]
     direction TB
-    CF["booking-agent.ts<br/>buildSelectionResultMessages()<br/>ghi tool-call booking_hotel_result"]
+    CF["booking-agent.ts + tools/booking-result.ts<br/>emit card hoàn tất, rồi persist<br/>booking_hotel_result tool-call/result"]
     CKPT0[("Checkpoint PostgresSaver<br/>tại thời điểm confirm")]
   end
 
@@ -765,9 +850,12 @@ flowchart TD
 **Từng bước — flow thật:**
 
 1. **Booking được confirm (trước đó, flow bình thường).** Lúc hotel/flight được confirm,
-   [`booking-agent.ts`](../src/nodes/booking-agent.ts)'s `buildSelectionResultMessages()` ghi 1
-   tool-call `booking_flight_result`/`booking_hotel_result` vào `state.messages` — đây là thứ
-   khiến options gốc còn phục hồi được sau này, và cũng chính là checkpoint sẽ bị fork sau này.
+   [`booking-agent.ts`](../src/nodes/booking-agent.ts)'s `buildSelectionResultMessages()` gọi
+   internal result tool trong [`tools/booking-result.ts`](../src/tools/booking-result.ts) để emit
+   card hoàn tất trước responder, rồi persist cặp tool-call/ToolMessage
+   `booking_flight_result`/`booking_hotel_result` vào `state.messages`. AI message dùng lại ID
+   live card để snapshot không reorder; options persist là dữ liệu để phục hồi lựa chọn về sau,
+   và cũng chính là checkpoint sẽ bị fork.
 2. **Nút "Change selection".** [`itinerary-sidebar-item.tsx`](../../web/src/components/itinerary-sidebar/itinerary-sidebar-item.tsx)
    hiện nút này trên mọi item flight/hotel.
 3. **Phục hồi options gốc.** [`findOriginalOptionsForItem`](../../web/src/utils/booking-selection.ts)
@@ -788,7 +876,7 @@ flowchart TD
    Không thấy → `404`.
 9. **Fork nó.** Build `nextItinerary` từ item của **checkpoint đó** (không phải item mới nhất),
    thay `itemId` bằng `newItem`, rồi gọi `client.threads.updateState(threadId, { values: {
-   itinerary: nextItinerary }, checkpoint: <checkpoint tìm được> })` — ghi 1 checkpoint mới có
+itinerary: nextItinerary }, checkpoint: <checkpoint tìm được> })` — ghi 1 checkpoint mới có
    parent là checkpoint cũ, và nó trở thành state mới nhất (live) của thread.
 10. **Đánh đổi cố ý.** Item/tin nhắn thêm vào **sau** thời điểm confirm gốc sẽ bị bỏ lại ở nhánh
     cũ (vẫn còn nguyên, truy được qua checkpoint gốc — không mất dữ liệu) nhưng **không có** trong
