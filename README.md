@@ -62,6 +62,20 @@ sang 1 trong 6 node domain. Gộp thành 1 agent bind hết tool sẽ gặp:
  
 - Project hiện không có supervisor đúng nghĩa. intentClassification là initial intent router, còn compoundRequestRouter là router cho yêu cầu travel nhiều bước. Cả hai đều làm routing trong phạm vi cụ thể, không quản lý và validate toàn bộ agent như một supervisor.
 
+
+## 3. Flow của graph
+
+- Đầu tiên, `loadContext` tải state và itinerary hiện tại của user.
+- Sau đó, `intentClassification` phân loại message và chuyển request đến agent tương ứng.
+- `bookingAgent` sử dụng MCP local để tìm flight/hotel và dùng HITL để chờ user lựa chọn kết quả.
+- `weatherAgent` và `placesAgent` gọi API trực tiếp, sau đó đi qua `compoundRequestRouter`. Node này kiểm tra request ban đầu, kết quả vừa nhận và các bước đã hoàn thành để quyết định có tiếp tục một bước khác trong cùng lượt hay không.
+- `policyAgent` sử dụng RAG: embed câu hỏi, tìm các policy chunk liên quan đã lưu trong database và cung cấp dữ liệu đó để tạo câu trả lời.
+- `memoryAgent` xử lý các yêu cầu lưu hoặc truy xuất long-term memory một cách tường minh, sau đó chuyển kết quả đến `responder`.
+- Các flow cuối cùng tap trung tại `responder` để tạo câu trả lời cho user.
+- Sau khi `responder` hoàn thành, graph kiểm tra `state.intent`. Nếu intent thuộc nhóm `weather`, `places`, `booking` hoặc `cancel`, graph chạy thêm `memoryCapture` để phát hiện và lưu profile hoặc preference được user nói kèm; các intent còn lại đi thẳng đến `END`.
+- Việc kiểm tra này là conditional routing ở cấp graph, không phải `responder` quyết định có lưu memory hay không.
+
+
 ## 2. Từng node: model, kiểu, tool
 
 Phân biệt theo việc node có cần **model ra quyết định** hay không, và nếu có thì model đó bind
@@ -103,18 +117,6 @@ memoryCapture và booking-result lifecycle gọi trực tiếp; cộng thêm 2 t
 
 - `interrupt()` (xem `booking-agent.ts` ở trên) — MCP còn đóng vai trò service boundary tách
   biệt logic điều phối graph khỏi call API đặt vé/khách sạn.
-
-## 3. Flow của graph
-
-- Đầu tiên, `loadContext` tải state và itinerary hiện tại của user.
-- Sau đó, `intentClassification` phân loại message và chuyển request đến agent tương ứng.
-- `bookingAgent` sử dụng MCP local để tìm flight/hotel và dùng HITL để chờ user lựa chọn kết quả.
-- `weatherAgent` và `placesAgent` gọi API trực tiếp, sau đó đi qua `compoundRequestRouter`. Node này kiểm tra request ban đầu, kết quả vừa nhận và các bước đã hoàn thành để quyết định có tiếp tục một bước khác trong cùng lượt hay không.
-- `policyAgent` sử dụng RAG: embed câu hỏi, tìm các policy chunk liên quan đã lưu trong database và cung cấp dữ liệu đó để tạo câu trả lời.
-- `memoryAgent` xử lý các yêu cầu lưu hoặc truy xuất long-term memory một cách tường minh, sau đó chuyển kết quả đến `responder`.
-- Các flow cuối cùng tap trung tại `responder` để tạo câu trả lời cho user.
-- Sau khi `responder` hoàn thành, graph kiểm tra `state.intent`. Nếu intent thuộc nhóm `weather`, `places`, `booking` hoặc `cancel`, graph chạy thêm `memoryCapture` để phát hiện và lưu profile hoặc preference được user nói kèm; các intent còn lại đi thẳng đến `END`.
-- Việc kiểm tra này là conditional routing ở cấp graph, không phải `responder` quyết định có lưu memory hay không.
 
 ## 4. Memory: short-term vs long-term
 
