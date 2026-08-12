@@ -28,7 +28,7 @@
 
 ## 1. Vì sao tách nhiều node riêng thay vì 1 agent to duy nhất?
 
-**intentClassification** chịu trách nhiệm định tuyến request ban đầu. Còn **compoundRequestRouter** chỉ chọn bước tiếp theo sau khi đã có kết quả weather hoặc places, nhằm kiểm tra xem yêu cầu nhiều bước của user có cần chuyển tiếp sang places, weather hoặc booking hay không.
+**intentClassification** chịu trách nhiệm định tuyến request ban đầu. Còn **compoundRequestRouter** request chứa nhiều tác vụ trong cùng một câu, node chỉ chọn và chỉ route sang các tác vụ weather / places / booking theo mà user đã yêu cầu
 
 - Đọc toolResult.
 - Đánh dấu domain đã hoàn thành.
