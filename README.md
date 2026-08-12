@@ -5,6 +5,8 @@
 - [Agent Graph Architecture](#agent-graph-architecture)
   - [Mục lục](#mục-lục)
   - [1. Vì sao tách nhiều node riêng thay vì 1 agent to duy nhất?](#1-vì-sao-tách-nhiều-node-riêng-thay-vì-1-agent-to-duy-nhất)
+  - [1.1 Langgraph.json là gì?](#1.1-Langgraph.json-là-gì?)
+  - [1.2 MCP dùng để làm gì? Vì sao chọn MCP?](#1.1-MCP-dùng-để-làm-gì?-Vì-sao-chọn-MCP?)
   - [2. Từng node: model, kiểu, tool](#2-từng-node-model-kiểu-tool)
   - [3. Flow của graph](#3-flow-của-graph)
   - [4. Memory: short-term vs long-term](#4-memory-short-term-vs-long-term)
@@ -43,10 +45,29 @@ sang 1 trong 6 node domain. Gộp thành 1 agent bind hết tool sẽ gặp:
 - Mỗi domain có reducer state khác nhau (`itinerary` overwrite, `messages` concat).
 - Test theo từng node độc lập dễ hơn nhiều so với 1 agent khổng lồ.
 
+## 1.1 Langgraph.json là gì?
+- Đây là file cấu hình để LangGraph CLI/Studio biết cách chạy agent
+
+## 1.2 MCP dùng để làm gì? Vì sao chọn MCP?
+- MCP là một protocol chuẩn đóng vai trò lớp trung gian giữa agent và external tools/services.
+- Trong project này, booking logic được expose qua MCP server local để demo và áp dụng cách tích hợp MCP; hiện chưa có hệ thống bên thứ ba nào sử dụng server này. Nếu sau này cần cho application hoặc agent khác truy cập, MCP server phải được deploy bằng remote transport phù hợp thay vì dùng stdio local như hiện tại.
+
+## 1.3 Supervisor là gì?
+- Supervisor trong multi-agent architecture thường là một agent quản lý các agent khác:
+  - Chọn agent nào chạy.
+  - Kiểm tra kết quả.
+  - Có thể yêu cầu retry hoặc chuyển sang agent khác.
+  - Quản lý workflow tổng thể.
+ 
+- Project hiện không có supervisor đúng nghĩa. intentClassification là initial intent router, còn compoundRequestRouter là router cho yêu cầu travel nhiều bước. Cả hai đều làm routing trong phạm vi cụ thể, không quản lý và validate toàn bộ agent như một supervisor.
+
 ## 2. Từng node: model, kiểu, tool
 
 Phân biệt theo việc node có cần **model ra quyết định** hay không, và nếu có thì model đó bind
 tool gì.
+- Temperature điều khiển mức độ ngẫu nhiên của model:
+  - temperature: 0: ưu tiên kết quả ổn định, ít thay đổi.
+  - Temperature cao hơn: output đa dạng/sáng tạo hơn.
 
 | Node                         | Model                                                  | Kiểu                                                                                       | Mô tả                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ---------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -136,6 +157,26 @@ short-term = "cuộc chat này đang tới đâu", long-term = "user này là ai
 - **Chưa có auth thật** — `DEMO_USER_ID = 'demo-user'` hardcode trong
   [`src/constants/db.ts`](../src/constants/db.ts), share chung 1 namespace. Multi-user thật cần
   thay bằng user id từ session.
+
+## 9. RAG — pgvector vs keyword, node hay tool
+- Distance 0.5 là gì?
+  - Đây là ngưỡng cosine distance khi tìm policy chunks bằng pgvector:
+    - Gần 0: rất tương đồng.
+    - 0.5: ngưỡng chấp nhận hiện tại.
+    - Lớn hơn 0.5: bị xem là không đủ liên quan và bị loại.
+
+- **Hiện tại**: câu hỏi policy cụ thể dùng pgvector cosine distance (ngưỡng
+  `POLICY_MATCH_MAX_DISTANCE = 0.5`), không có full-text/keyword search. Câu hỏi policy chung
+  dùng `retrievePolicyTopics()` đọc `topic/title` của chunk trong DB để tạo lựa chọn động.
+- **Hybrid được không?** Được (vector + full-text + rerank), nhưng chưa cần vì corpus nhỏ.
+  Đánh giá "nhỏ hay lớn" dựa vào:
+  - **Số chunk**: vài chục–vài trăm = nhỏ; chục nghìn–triệu = lớn.
+  - **Chi phí thêm hybrid** (2 query + merge/rerank) có đáng so với lợi ích không.
+  - Corpus hiện tại: 5 section, ~4 dòng/section → quá nhỏ để vector-only bị nhầm.
+- **Node hay tool?** Tool (`policyTool`) gọi từ node (`policyAgent`) — RAG là lookup 1 bước,
+  không cần pause/resume nhiều bước như `bookingAgent`, nhưng model vẫn cần quyết định có gọi
+  RAG hay không → đúng kiểu tool trong agent node.
+- Corpus test dùng bản ngắn (`rag/corpus/booking-policy.md`, 5 section) để đỡ tốn token.
 
 ## 10. Viết unit test (step by step)
 
