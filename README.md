@@ -598,22 +598,12 @@ chunk đó và tiếp tục xử lý các chunk còn lại.
 Nếu user chỉ hỏi chung chung, ví dụ "booking policy", policyTool sử dụng
 list_topics.
 
-Flow này không tạo embedding và không chạy vector search.
 Nó query topic và title trực tiếp từ policy_chunks -> liệt kê ra các policy -> sau đó agent sẽ hỏi lại
 user muốn tìm hiểu policy nào.
 
 Nếu user hỏi một câu cụ thể -> policyTool sẽ sử dụng search mode.
 
-Câu hỏi của user được chuyển thành query embedding bằng cùng model
-text-embedding-3-small.
-
-Query vector sau đó được so sánh với các chunk embedding trong policy_chunks
-bằng pgvector cosine distance.
-
-Hệ thống lấy tối đa ba chunk phù hợp nhất và chỉ chấp nhận những kết quả có
-distance nhỏ hơn hoặc bằng 0.5.
-
-Các matched chunks được đưa vào context, sau đó responder tạo câu trả lời
+Query đến database -> Hệ thống lấy tối đa ba chunk phù hợp nhất. Các matched chunks được đưa vào context, sau đó responder tạo câu trả lời
 dựa trên nội dung policy đã retrieve
 
 Nếu không có chunk đủ liên quan, responder phải nói rằng thông tin đó chưa
